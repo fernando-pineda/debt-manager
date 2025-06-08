@@ -2,6 +2,7 @@ import {
   Calculator,
   Check,
   CreditCard,
+  DollarSign,
   Plus,
   Receipt,
   Trash2,
@@ -10,7 +11,8 @@ import {
 import React, { useState } from "react";
 
 const DebtManagementPlatform = () => {
-  const [activeTab, setActiveTab] = useState("debts");
+  const [activeTab, setActiveTab] = useState("expenses");
+  const [activeMonth, setActiveMonth] = useState(new Date().getMonth());
   const [debts, setDebts] = useState(() => {
     const savedDebts = localStorage.getItem("debts");
     return savedDebts ? JSON.parse(savedDebts) : [];
@@ -23,6 +25,11 @@ const DebtManagementPlatform = () => {
   const [showExpenseModal, setShowExpenseModal] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [selectedDebt, setSelectedDebt] = useState(null);
+  const [showIncomeModal, setShowIncomeModal] = useState(false);
+  const [incomes, setIncomes] = useState(() => {
+    const savedIncomes = localStorage.getItem("incomes");
+    return savedIncomes ? JSON.parse(savedIncomes) : [];
+  });
 
   const [debtForm, setDebtForm] = useState({
     name: "",
@@ -40,12 +47,21 @@ const DebtManagementPlatform = () => {
     amount: "",
     category: "Servicios",
     paid: false,
+    isFixed: false,
+    month: activeMonth,
   });
 
   const [paymentForm, setPaymentForm] = useState({
     amount: "",
     date: new Date().toISOString().split("T")[0],
     type: "payment",
+  });
+
+  const [incomeForm, setIncomeForm] = useState({
+    name: "",
+    amount: "",
+    isFixed: false,
+    month: activeMonth,
   });
 
   const categories = [
@@ -57,6 +73,21 @@ const DebtManagementPlatform = () => {
     "Educación",
     "Hogar",
     "Otros",
+  ];
+
+  const months = [
+    "Enero",
+    "Febrero",
+    "Marzo",
+    "Abril",
+    "Mayo",
+    "Junio",
+    "Julio",
+    "Agosto",
+    "Septiembre",
+    "Octubre",
+    "Noviembre",
+    "Diciembre",
   ];
 
   const calculateNextPayment = (debt) => {
@@ -159,6 +190,8 @@ const DebtManagementPlatform = () => {
       amount: "",
       category: "Servicios",
       paid: false,
+      isFixed: false,
+      month: activeMonth,
     });
     setShowExpenseModal(false);
   };
@@ -183,6 +216,32 @@ const DebtManagementPlatform = () => {
     localStorage.setItem("debts", JSON.stringify(updatedDebts));
   };
 
+  const addIncome = () => {
+    const newIncome = {
+      id: Date.now(),
+      ...incomeForm,
+      amount: parseFloat(incomeForm.amount),
+    };
+
+    const updatedIncomes = [...incomes, newIncome];
+    setIncomes(updatedIncomes);
+    localStorage.setItem("incomes", JSON.stringify(updatedIncomes));
+
+    setIncomeForm({
+      name: "",
+      amount: "",
+      isFixed: false,
+      month: activeMonth,
+    });
+    setShowIncomeModal(false);
+  };
+
+  const deleteIncome = (id) => {
+    const updatedIncomes = incomes.filter((income) => income.id !== id);
+    setIncomes(updatedIncomes);
+    localStorage.setItem("incomes", JSON.stringify(updatedIncomes));
+  };
+
   const getFinancialSummary = () => {
     const totalDebt = debts.reduce((sum, debt) => sum + debt.currentBalance, 0);
     const totalMonthlyDebt = debts.reduce(
@@ -203,6 +262,49 @@ const DebtManagementPlatform = () => {
       totalMonthlyExpenses,
       unpaidExpenses,
       totalMonthlyCommitments: totalMonthlyDebt + totalMonthlyExpenses,
+    };
+  };
+
+  const getMonthlySummary = (month) => {
+    const monthExpenses = expenses.filter(
+      (expense) => expense.isFixed || expense.month === month
+    );
+
+    const monthIncomes = incomes.filter(
+      (income) => income.isFixed || income.month === month
+    );
+
+    const totalExpenses = monthExpenses.reduce(
+      (sum, expense) => sum + expense.amount,
+      0
+    );
+
+    const totalIncomes = monthIncomes.reduce(
+      (sum, income) => sum + income.amount,
+      0
+    );
+
+    const fixedExpenses = monthExpenses.filter((e) => e.isFixed);
+    const variableExpenses = monthExpenses.filter((e) => !e.isFixed);
+
+    const fixedIncomes = monthIncomes.filter((i) => i.isFixed);
+    const variableIncomes = monthIncomes.filter((i) => !i.isFixed);
+
+    return {
+      totalExpenses,
+      fixedExpenses,
+      variableExpenses,
+      fixedTotal: fixedExpenses.reduce((sum, e) => sum + e.amount, 0),
+      variableTotal: variableExpenses.reduce((sum, e) => sum + e.amount, 0),
+      totalIncomes,
+      fixedIncomes,
+      variableIncomes,
+      fixedIncomeTotal: fixedIncomes.reduce((sum, i) => sum + i.amount, 0),
+      variableIncomeTotal: variableIncomes.reduce(
+        (sum, i) => sum + i.amount,
+        0
+      ),
+      balance: totalIncomes - totalExpenses,
     };
   };
 
@@ -292,7 +394,7 @@ const DebtManagementPlatform = () => {
                 : "bg-white text-gray-600 hover:bg-gray-50"
             }`}
           >
-            Gastos Fijos
+            Gastos
           </button>
         </div>
 
@@ -455,98 +557,205 @@ const DebtManagementPlatform = () => {
           <div className="space-y-6">
             <div className="flex justify-between items-center">
               <h2 className="text-2xl font-bold text-gray-800">
-                Gastos Fijos Mensuales
+                Gestión de Gastos e Ingresos
               </h2>
-              <button
-                onClick={() => setShowExpenseModal(true)}
-                className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
-              >
-                <Plus className="h-4 w-4" />
-                Agregar Gasto
-              </button>
-            </div>
-
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              {categories.map((category) => {
-                const categoryExpenses = expenses.filter(
-                  (e) => e.category === category
-                );
-                const total = categoryExpenses.reduce(
-                  (sum, e) => sum + e.amount,
-                  0
-                );
-                if (total === 0) return null;
-
-                return (
-                  <div
-                    key={category}
-                    className="bg-white rounded-lg shadow-md p-4"
-                  >
-                    <p className="text-sm font-medium text-gray-600">
-                      {category}
-                    </p>
-                    <p className="text-lg font-bold text-blue-600">
-                      ${total.toLocaleString()}
-                    </p>
-                    <p className="text-xs text-gray-500">
-                      {categoryExpenses.length} gastos
-                    </p>
-                  </div>
-                );
-              })}
-            </div>
-
-            <div className="grid gap-4">
-              {expenses.map((expense) => (
-                <div
-                  key={expense.id}
-                  className="bg-white rounded-lg shadow-md p-4"
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setShowIncomeModal(true)}
+                  className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2"
                 >
-                  <div className="flex justify-between items-center">
-                    <div className="flex items-center gap-3">
-                      <button
-                        onClick={() => toggleExpensePaid(expense.id)}
-                        className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors ${
-                          expense.paid
-                            ? "bg-green-600 border-green-600 text-white"
-                            : "border-gray-300 hover:border-green-500"
-                        }`}
-                      >
-                        {expense.paid && <Check className="h-4 w-4" />}
-                      </button>
+                  <DollarSign className="h-4 w-4" />
+                  Agregar Ingreso
+                </button>
+                <button
+                  onClick={() => setShowExpenseModal(true)}
+                  className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
+                >
+                  <Plus className="h-4 w-4" />
+                  Agregar Gasto
+                </button>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto">
+              <div className="flex space-x-2 pb-2">
+                {months.map((month, index) => (
+                  <button
+                    key={month}
+                    onClick={() => setActiveMonth(index)}
+                    className={`px-4 py-2 rounded-lg font-medium whitespace-nowrap transition-all ${
+                      activeMonth === index
+                        ? "bg-blue-600 text-white shadow-lg"
+                        : "bg-white text-gray-600 hover:bg-gray-50"
+                    }`}
+                  >
+                    {month}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div className="md:col-span-2">
+                <div className="bg-white rounded-lg shadow-md p-6">
+                  <h3 className="text-lg font-semibold mb-4">
+                    Movimientos de {months[activeMonth]}
+                  </h3>
+
+                  <div className="space-y-4">
+                    {/* Ingresos */}
+                    {incomes
+                      .filter(
+                        (income) =>
+                          income.isFixed || income.month === activeMonth
+                      )
+                      .map((income) => (
+                        <div
+                          key={income.id}
+                          className="flex justify-between items-center p-4 bg-green-50 rounded-lg"
+                        >
+                          <div className="flex items-center gap-3">
+                            <div>
+                              <h3 className="font-medium text-gray-800">
+                                {income.name}
+                                {income.isFixed && (
+                                  <span className="ml-2 text-xs bg-green-100 text-green-800 px-2 py-1 rounded">
+                                    Fijo
+                                  </span>
+                                )}
+                              </h3>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <p className="font-bold text-green-600">
+                              +${income.amount.toLocaleString()}
+                            </p>
+                            <button
+                              onClick={() => deleteIncome(income.id)}
+                              className="text-red-600 hover:text-red-800 transition-colors"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+
+                    {/* Gastos */}
+                    {expenses
+                      .filter(
+                        (expense) =>
+                          expense.isFixed || expense.month === activeMonth
+                      )
+                      .map((expense) => (
+                        <div
+                          key={expense.id}
+                          className="flex justify-between items-center p-4 bg-gray-50 rounded-lg"
+                        >
+                          <div className="flex items-center gap-3">
+                            <button
+                              onClick={() => toggleExpensePaid(expense.id)}
+                              className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors ${
+                                expense.paid
+                                  ? "bg-green-600 border-green-600 text-white"
+                                  : "border-gray-300 hover:border-green-500"
+                              }`}
+                            >
+                              {expense.paid && <Check className="h-4 w-4" />}
+                            </button>
+                            <div>
+                              <h3
+                                className={`font-medium ${
+                                  expense.paid
+                                    ? "line-through text-gray-500"
+                                    : "text-gray-800"
+                                }`}
+                              >
+                                {expense.name}
+                                {expense.isFixed && (
+                                  <span className="ml-2 text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">
+                                    Fijo
+                                  </span>
+                                )}
+                              </h3>
+                              <p className="text-sm text-gray-600">
+                                {expense.category}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <p
+                              className={`font-bold ${
+                                expense.paid ? "text-gray-500" : "text-blue-600"
+                              }`}
+                            >
+                              -${expense.amount.toLocaleString()}
+                            </p>
+                            <button
+                              onClick={() => deleteExpense(expense.id)}
+                              className="text-red-600 hover:text-red-800 transition-colors"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-white rounded-lg shadow-md p-6">
+                <h3 className="text-lg font-semibold mb-4">
+                  Resumen de {months[activeMonth]}
+                </h3>
+                {(() => {
+                  const summary = getMonthlySummary(activeMonth);
+                  return (
+                    <div className="space-y-4">
                       <div>
-                        <h3
-                          className={`font-medium ${
-                            expense.paid
-                              ? "line-through text-gray-500"
-                              : "text-gray-800"
+                        <p className="text-sm text-gray-600">Ingresos Fijos</p>
+                        <p className="text-xl font-bold text-green-600">
+                          +${summary.fixedIncomeTotal.toLocaleString()}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-sm text-gray-600">
+                          Ingresos Variables
+                        </p>
+                        <p className="text-xl font-bold text-green-600">
+                          +${summary.variableIncomeTotal.toLocaleString()}
+                        </p>
+                      </div>
+                      <div className="pt-4 border-t">
+                        <p className="text-sm text-gray-600">Gastos Fijos</p>
+                        <p className="text-xl font-bold text-blue-600">
+                          -${summary.fixedTotal.toLocaleString()}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-sm text-gray-600">
+                          Gastos Variables
+                        </p>
+                        <p className="text-xl font-bold text-blue-600">
+                          -${summary.variableTotal.toLocaleString()}
+                        </p>
+                      </div>
+                      <div className="pt-4 border-t">
+                        <p className="text-sm text-gray-600">Balance</p>
+                        <p
+                          className={`text-2xl font-bold ${
+                            summary.balance >= 0
+                              ? "text-green-600"
+                              : "text-red-600"
                           }`}
                         >
-                          {expense.name}
-                        </h3>
-                        <p className="text-sm text-gray-600">
-                          {expense.category}
+                          {summary.balance >= 0 ? "+" : ""}$
+                          {summary.balance.toLocaleString()}
                         </p>
                       </div>
                     </div>
-                    <div className="flex items-center gap-3">
-                      <p
-                        className={`font-bold ${
-                          expense.paid ? "text-gray-500" : "text-blue-600"
-                        }`}
-                      >
-                        ${expense.amount.toLocaleString()}
-                      </p>
-                      <button
-                        onClick={() => deleteExpense(expense.id)}
-                        className="text-red-600 hover:text-red-800 transition-colors"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              ))}
+                  );
+                })()}
+              </div>
             </div>
           </div>
         )}
@@ -717,6 +926,43 @@ const DebtManagementPlatform = () => {
                     </option>
                   ))}
                 </select>
+
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="isFixed"
+                    checked={expenseForm.isFixed}
+                    onChange={(e) =>
+                      setExpenseForm({
+                        ...expenseForm,
+                        isFixed: e.target.checked,
+                      })
+                    }
+                    className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                  />
+                  <label htmlFor="isFixed" className="text-sm text-gray-600">
+                    Gasto Fijo (se aplica a todos los meses)
+                  </label>
+                </div>
+
+                {!expenseForm.isFixed && (
+                  <select
+                    value={expenseForm.month}
+                    onChange={(e) =>
+                      setExpenseForm({
+                        ...expenseForm,
+                        month: parseInt(e.target.value),
+                      })
+                    }
+                    className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  >
+                    {months.map((month, index) => (
+                      <option key={month} value={index}>
+                        {month}
+                      </option>
+                    ))}
+                  </select>
+                )}
               </div>
 
               <div className="flex gap-3 mt-6">
@@ -815,6 +1061,94 @@ const DebtManagementPlatform = () => {
                   className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
                   Registrar Pago
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showIncomeModal && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-lg p-6 w-full max-w-md mx-4">
+              <h3 className="text-lg font-semibold mb-4">
+                Agregar Nuevo Ingreso
+              </h3>
+
+              <div className="space-y-4">
+                <input
+                  type="text"
+                  placeholder="Nombre del ingreso"
+                  value={incomeForm.name}
+                  onChange={(e) =>
+                    setIncomeForm({ ...incomeForm, name: e.target.value })
+                  }
+                  className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+
+                <input
+                  type="number"
+                  placeholder="Monto"
+                  value={incomeForm.amount}
+                  onChange={(e) =>
+                    setIncomeForm({ ...incomeForm, amount: e.target.value })
+                  }
+                  className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="isFixedIncome"
+                    checked={incomeForm.isFixed}
+                    onChange={(e) =>
+                      setIncomeForm({
+                        ...incomeForm,
+                        isFixed: e.target.checked,
+                      })
+                    }
+                    className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                  />
+                  <label
+                    htmlFor="isFixedIncome"
+                    className="text-sm text-gray-600"
+                  >
+                    Ingreso Fijo (se aplica a todos los meses)
+                  </label>
+                </div>
+
+                {!incomeForm.isFixed && (
+                  <select
+                    value={incomeForm.month}
+                    onChange={(e) =>
+                      setIncomeForm({
+                        ...incomeForm,
+                        month: parseInt(e.target.value),
+                      })
+                    }
+                    className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  >
+                    {months.map((month, index) => (
+                      <option key={month} value={index}>
+                        {month}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+
+              <div className="flex gap-3 mt-6">
+                <button
+                  onClick={() => setShowIncomeModal(false)}
+                  className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={addIncome}
+                  disabled={!incomeForm.name || !incomeForm.amount}
+                  className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  Agregar
                 </button>
               </div>
             </div>
