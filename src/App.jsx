@@ -11,8 +11,14 @@ import React, { useState } from "react";
 
 const DebtManagementPlatform = () => {
   const [activeTab, setActiveTab] = useState("debts");
-  const [debts, setDebts] = useState([]);
-  const [expenses, setExpenses] = useState([]);
+  const [debts, setDebts] = useState(() => {
+    const savedDebts = localStorage.getItem("debts");
+    return savedDebts ? JSON.parse(savedDebts) : [];
+  });
+  const [expenses, setExpenses] = useState(() => {
+    const savedExpenses = localStorage.getItem("expenses");
+    return savedExpenses ? JSON.parse(savedExpenses) : [];
+  });
   const [showDebtModal, setShowDebtModal] = useState(false);
   const [showExpenseModal, setShowExpenseModal] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
@@ -88,7 +94,10 @@ const DebtManagementPlatform = () => {
       createdAt: new Date().toISOString(),
     };
 
-    setDebts([...debts, newDebt]);
+    const updatedDebts = [...debts, newDebt];
+    setDebts(updatedDebts);
+    localStorage.setItem("debts", JSON.stringify(updatedDebts));
+
     setDebtForm({
       name: "",
       type: "interest",
@@ -123,6 +132,8 @@ const DebtManagementPlatform = () => {
     });
 
     setDebts(updatedDebts);
+    localStorage.setItem("debts", JSON.stringify(updatedDebts));
+
     setPaymentForm({
       amount: "",
       date: new Date().toISOString().split("T")[0],
@@ -139,7 +150,10 @@ const DebtManagementPlatform = () => {
       amount: parseFloat(expenseForm.amount),
     };
 
-    setExpenses([...expenses, newExpense]);
+    const updatedExpenses = [...expenses, newExpense];
+    setExpenses(updatedExpenses);
+    localStorage.setItem("expenses", JSON.stringify(updatedExpenses));
+
     setExpenseForm({
       name: "",
       amount: "",
@@ -150,19 +164,23 @@ const DebtManagementPlatform = () => {
   };
 
   const toggleExpensePaid = (id) => {
-    setExpenses(
-      expenses.map((expense) =>
-        expense.id === id ? { ...expense, paid: !expense.paid } : expense
-      )
+    const updatedExpenses = expenses.map((expense) =>
+      expense.id === id ? { ...expense, paid: !expense.paid } : expense
     );
+    setExpenses(updatedExpenses);
+    localStorage.setItem("expenses", JSON.stringify(updatedExpenses));
   };
 
   const deleteExpense = (id) => {
-    setExpenses(expenses.filter((expense) => expense.id !== id));
+    const updatedExpenses = expenses.filter((expense) => expense.id !== id);
+    setExpenses(updatedExpenses);
+    localStorage.setItem("expenses", JSON.stringify(updatedExpenses));
   };
 
   const deleteDebt = (id) => {
-    setDebts(debts.filter((debt) => debt.id !== id));
+    const updatedDebts = debts.filter((debt) => debt.id !== id);
+    setDebts(updatedDebts);
+    localStorage.setItem("debts", JSON.stringify(updatedDebts));
   };
 
   const getFinancialSummary = () => {
@@ -533,9 +551,8 @@ const DebtManagementPlatform = () => {
           </div>
         )}
 
-        {/* Modal para agregar deuda */}
         {showDebtModal && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
             <div className="bg-white rounded-lg p-6 w-full max-w-md mx-4">
               <h3 className="text-lg font-semibold mb-4">
                 Agregar Nueva Deuda
@@ -659,9 +676,8 @@ const DebtManagementPlatform = () => {
           </div>
         )}
 
-        {/* Modal para agregar gasto */}
         {showExpenseModal && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
             <div className="bg-white rounded-lg p-6 w-full max-w-md mx-4">
               <h3 className="text-lg font-semibold mb-4">
                 Agregar Nuevo Gasto
@@ -722,9 +738,8 @@ const DebtManagementPlatform = () => {
           </div>
         )}
 
-        {/* Modal para agregar pago */}
         {showPaymentModal && selectedDebt && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
             <div className="bg-white rounded-lg p-6 w-full max-w-md mx-4">
               <h3 className="text-lg font-semibold mb-4">
                 Registrar Pago - {selectedDebt.name}
