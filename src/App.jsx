@@ -13,6 +13,7 @@ import React, { useState } from "react";
 const DebtManagementPlatform = () => {
   const [activeTab, setActiveTab] = useState("expenses");
   const [activeMonth, setActiveMonth] = useState(new Date().getMonth());
+  const [activeYear, setActiveYear] = useState(new Date().getFullYear());
   const [debts, setDebts] = useState(() => {
     const savedDebts = localStorage.getItem("debts");
     return savedDebts ? JSON.parse(savedDebts) : [];
@@ -23,13 +24,17 @@ const DebtManagementPlatform = () => {
   });
   const [showDebtModal, setShowDebtModal] = useState(false);
   const [showExpenseModal, setShowExpenseModal] = useState(false);
-  const [showPaymentModal, setShowPaymentModal] = useState(false);
-  const [selectedDebt, setSelectedDebt] = useState(null);
   const [showIncomeModal, setShowIncomeModal] = useState(false);
   const [incomes, setIncomes] = useState(() => {
     const savedIncomes = localStorage.getItem("incomes");
     return savedIncomes ? JSON.parse(savedIncomes) : [];
   });
+  const [showAdvancePaymentModal, setShowAdvancePaymentModal] = useState(false);
+  const [selectedDebtForAdvance, setSelectedDebtForAdvance] = useState(null);
+  const [advancePaymentCount, setAdvancePaymentCount] = useState(1);
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [itemToDelete, setItemToDelete] = useState(null);
+  const [deleteType, setDeleteType] = useState(null);
 
   const [debtForm, setDebtForm] = useState({
     name: "",
@@ -39,7 +44,7 @@ const DebtManagementPlatform = () => {
     interestRate: "",
     termMonths: "",
     monthlyPayment: "",
-    advancePayments: "",
+    advancePaymentAmount: "",
   });
 
   const [expenseForm, setExpenseForm] = useState({
@@ -49,12 +54,10 @@ const DebtManagementPlatform = () => {
     paid: false,
     isFixed: false,
     month: activeMonth,
-  });
-
-  const [paymentForm, setPaymentForm] = useState({
-    amount: "",
-    date: new Date().toISOString().split("T")[0],
-    type: "payment",
+    year: activeYear,
+    isDebtPayment: false,
+    linkedDebtId: null,
+    paymentType: "regular",
   });
 
   const [incomeForm, setIncomeForm] = useState({
@@ -62,6 +65,7 @@ const DebtManagementPlatform = () => {
     amount: "",
     isFixed: false,
     month: activeMonth,
+    year: activeYear,
   });
 
   const categories = [
@@ -102,13 +106,23 @@ const DebtManagementPlatform = () => {
         newBalance: debt.currentBalance - principal,
       };
     } else {
+      // Para deudas de pago fijo
+      const remainingPayments = debt.termMonths - debt.advancePayments;
+      const currentBalance = debt.monthlyPayment * remainingPayments;
       return {
         total: debt.monthlyPayment,
         interest: 0,
         principal: debt.monthlyPayment,
-        newBalance: debt.currentBalance - debt.monthlyPayment,
+        newBalance: currentBalance - debt.monthlyPayment,
       };
     }
+  };
+
+  const getYearRange = () => {
+    const currentYear = new Date().getFullYear();
+    const maxTermMonths = Math.max(...debts.map((debt) => debt.termMonths), 0);
+    const yearsToAdd = Math.ceil(maxTermMonths / 12) + 2; // +2 para tener margen
+    return Array.from({ length: yearsToAdd }, (_, i) => currentYear - 2 + i);
   };
 
   const addDebt = () => {
@@ -116,11 +130,15 @@ const DebtManagementPlatform = () => {
       id: Date.now(),
       ...debtForm,
       principal: parseFloat(debtForm.principal),
-      currentBalance: parseFloat(debtForm.currentBalance),
+      currentBalance:
+        debtForm.type === "fixed"
+          ? parseFloat(debtForm.monthlyPayment) * parseInt(debtForm.termMonths)
+          : parseFloat(debtForm.currentBalance),
       interestRate: parseFloat(debtForm.interestRate) || 0,
       termMonths: parseInt(debtForm.termMonths),
       monthlyPayment: parseFloat(debtForm.monthlyPayment),
-      advancePayments: parseInt(debtForm.advancePayments) || 0,
+      advancePayments: 0,
+      advancePaymentAmount: parseFloat(debtForm.advancePaymentAmount) || 0,
       payments: [],
       createdAt: new Date().toISOString(),
     };
@@ -128,6 +146,41 @@ const DebtManagementPlatform = () => {
     const updatedDebts = [...debts, newDebt];
     setDebts(updatedDebts);
     localStorage.setItem("debts", JSON.stringify(updatedDebts));
+
+    // Crear los gastos mensuales para la deuda
+    const currentDate = new Date();
+    const newExpenses = [];
+
+    // Para deudas de pago fijo, solo crear los gastos para las letras no adelantadas
+    const totalPayments =
+      newDebt.type === "fixed"
+        ? newDebt.termMonths - newDebt.advancePayments
+        : newDebt.termMonths;
+
+    for (let i = 0; i < totalPayments; i++) {
+      const paymentDate = new Date(currentDate);
+      paymentDate.setMonth(currentDate.getMonth() + i);
+
+      const newExpense = {
+        id: Date.now() + i,
+        name: `Pago mensual - ${newDebt.name}`,
+        amount: newDebt.monthlyPayment,
+        category: "Deuda",
+        paid: false,
+        isFixed: false,
+        month: paymentDate.getMonth(),
+        year: paymentDate.getFullYear(),
+        isDebtPayment: true,
+        linkedDebtId: newDebt.id,
+        paymentType: "regular",
+      };
+
+      newExpenses.push(newExpense);
+    }
+
+    const updatedExpenses = [...expenses, ...newExpenses];
+    setExpenses(updatedExpenses);
+    localStorage.setItem("expenses", JSON.stringify(updatedExpenses));
 
     setDebtForm({
       name: "",
@@ -137,53 +190,92 @@ const DebtManagementPlatform = () => {
       interestRate: "",
       termMonths: "",
       monthlyPayment: "",
-      advancePayments: "",
+      advancePaymentAmount: "",
     });
     setShowDebtModal(false);
   };
 
-  const addPayment = () => {
-    const payment = {
-      id: Date.now(),
-      amount: parseFloat(paymentForm.amount),
-      date: paymentForm.date,
-      type: paymentForm.type,
-    };
+  const payAdvancePayment = (debtId, count = 1) => {
+    const debt = debts.find((d) => d.id === debtId);
+    if (!debt || debt.type !== "fixed") return;
 
-    const updatedDebts = debts.map((debt) => {
-      if (debt.id === selectedDebt.id) {
-        const newBalance = debt.currentBalance - payment.amount;
+    const newPayments = Array.from({ length: count }, (_, i) => ({
+      id: Date.now() + i,
+      amount: debt.advancePaymentAmount,
+      date: new Date().toISOString().split("T")[0],
+      type: "advance",
+      expenseId: null,
+    }));
+
+    const updatedDebts = debts.map((d) => {
+      if (d.id === debtId) {
         return {
-          ...debt,
-          currentBalance: Math.max(0, newBalance),
-          payments: [...debt.payments, payment],
+          ...d,
+          advancePayments: d.advancePayments + count,
+          currentBalance:
+            d.monthlyPayment * (d.termMonths - d.advancePayments - count),
+          payments: [...d.payments, ...newPayments],
         };
       }
-      return debt;
+      return d;
     });
 
     setDebts(updatedDebts);
     localStorage.setItem("debts", JSON.stringify(updatedDebts));
 
-    setPaymentForm({
-      amount: "",
-      date: new Date().toISOString().split("T")[0],
-      type: "payment",
+    // Eliminar los gastos mensuales correspondientes a las letras adelantadas
+    const updatedExpenses = [...expenses];
+    const debtExpenses = expenses.filter((e) => e.linkedDebtId === debtId);
+
+    // Ordenar los gastos por fecha (del más lejano al más cercano)
+    const sortedExpenses = debtExpenses.sort((a, b) => {
+      const dateA = new Date(a.year, a.month);
+      const dateB = new Date(b.year, b.month);
+      return dateB - dateA;
     });
-    setShowPaymentModal(false);
-    setSelectedDebt(null);
+
+    // Eliminar los últimos 'count' gastos
+    const expensesToRemove = sortedExpenses.slice(0, count);
+    expensesToRemove.forEach((expense) => {
+      const index = updatedExpenses.findIndex((e) => e.id === expense.id);
+      if (index !== -1) {
+        updatedExpenses.splice(index, 1);
+      }
+    });
+
+    setExpenses(updatedExpenses);
+    localStorage.setItem("expenses", JSON.stringify(updatedExpenses));
+
+    setShowAdvancePaymentModal(false);
+    setSelectedDebtForAdvance(null);
+    setAdvancePaymentCount(1);
   };
 
   const addExpense = () => {
-    const newExpense = {
-      id: Date.now(),
-      ...expenseForm,
-      amount: parseFloat(expenseForm.amount),
-    };
+    if (expenseForm.isFixed) {
+      // Crear una instancia del gasto para cada mes
+      const newExpenses = months.map((_, monthIndex) => ({
+        id: Date.now() + monthIndex, // ID único para cada instancia
+        ...expenseForm,
+        amount: parseFloat(expenseForm.amount),
+        month: monthIndex,
+        paid: false,
+      }));
 
-    const updatedExpenses = [...expenses, newExpense];
-    setExpenses(updatedExpenses);
-    localStorage.setItem("expenses", JSON.stringify(updatedExpenses));
+      const updatedExpenses = [...expenses, ...newExpenses];
+      setExpenses(updatedExpenses);
+      localStorage.setItem("expenses", JSON.stringify(updatedExpenses));
+    } else {
+      const newExpense = {
+        id: Date.now(),
+        ...expenseForm,
+        amount: parseFloat(expenseForm.amount),
+      };
+
+      const updatedExpenses = [...expenses, newExpense];
+      setExpenses(updatedExpenses);
+      localStorage.setItem("expenses", JSON.stringify(updatedExpenses));
+    }
 
     setExpenseForm({
       name: "",
@@ -192,28 +284,119 @@ const DebtManagementPlatform = () => {
       paid: false,
       isFixed: false,
       month: activeMonth,
+      year: activeYear,
+      isDebtPayment: false,
+      linkedDebtId: null,
+      paymentType: "regular",
     });
     setShowExpenseModal(false);
   };
 
   const toggleExpensePaid = (id) => {
+    const expense = expenses.find((e) => e.id === id);
     const updatedExpenses = expenses.map((expense) =>
       expense.id === id ? { ...expense, paid: !expense.paid } : expense
     );
     setExpenses(updatedExpenses);
     localStorage.setItem("expenses", JSON.stringify(updatedExpenses));
+
+    // Si es un pago de deuda, actualizar la deuda
+    if (expense?.isDebtPayment && expense?.linkedDebtId) {
+      const updatedDebts = debts.map((debt) => {
+        if (debt.id === expense.linkedDebtId) {
+          // Si se está marcando como pagado
+          if (!expense.paid) {
+            const paymentDate = new Date();
+            paymentDate.setMonth(expense.month);
+            paymentDate.setFullYear(expense.year);
+
+            // Para deudas de pago fijo, el saldo se calcula basado en las letras restantes
+            const newBalance =
+              debt.type === "fixed"
+                ? debt.monthlyPayment *
+                  (debt.termMonths -
+                    debt.advancePayments -
+                    debt.payments.length -
+                    1)
+                : debt.currentBalance - expense.amount;
+
+            return {
+              ...debt,
+              currentBalance: Math.max(0, newBalance),
+              payments: [
+                ...debt.payments,
+                {
+                  id: Date.now(),
+                  amount: expense.amount,
+                  date: paymentDate.toISOString().split("T")[0],
+                  type: expense.paymentType,
+                  expenseId: expense.id,
+                },
+              ],
+            };
+          }
+          // Si se está desmarcando como pagado
+          else {
+            const newBalance =
+              debt.type === "fixed"
+                ? debt.monthlyPayment *
+                  (debt.termMonths -
+                    debt.advancePayments -
+                    debt.payments.length +
+                    1)
+                : debt.currentBalance + expense.amount;
+
+            return {
+              ...debt,
+              currentBalance: Math.max(0, newBalance),
+              payments: debt.payments.filter((p) => p.expenseId !== expense.id),
+            };
+          }
+        }
+        return debt;
+      });
+      setDebts(updatedDebts);
+      localStorage.setItem("debts", JSON.stringify(updatedDebts));
+    }
   };
 
   const deleteExpense = (id) => {
+    const expense = expenses.find((e) => e.id === id);
+    if (!expense) return;
+
+    // Si es un gasto fijo y no está vinculado a una deuda, eliminar todas sus instancias
+    if (expense.isFixed && !expense.isDebtPayment) {
+      const updatedExpenses = expenses.filter(
+        (e) => !(e.name === expense.name && e.isFixed && !e.isDebtPayment)
+      );
+      setExpenses(updatedExpenses);
+      localStorage.setItem("expenses", JSON.stringify(updatedExpenses));
+      return;
+    }
+
+    // Si es un gasto de deuda, no permitir eliminarlo
+    if (expense.isDebtPayment) {
+      return;
+    }
+
+    // Para gastos normales no fijos
     const updatedExpenses = expenses.filter((expense) => expense.id !== id);
     setExpenses(updatedExpenses);
     localStorage.setItem("expenses", JSON.stringify(updatedExpenses));
   };
 
   const deleteDebt = (id) => {
+    // Eliminar la deuda
     const updatedDebts = debts.filter((debt) => debt.id !== id);
     setDebts(updatedDebts);
     localStorage.setItem("debts", JSON.stringify(updatedDebts));
+
+    // Eliminar todos los gastos asociados a esta deuda
+    const updatedExpenses = expenses.filter(
+      (expense) => expense.linkedDebtId !== id
+    );
+    setExpenses(updatedExpenses);
+    localStorage.setItem("expenses", JSON.stringify(updatedExpenses));
   };
 
   const addIncome = () => {
@@ -232,6 +415,7 @@ const DebtManagementPlatform = () => {
       amount: "",
       isFixed: false,
       month: activeMonth,
+      year: activeYear,
     });
     setShowIncomeModal(false);
   };
@@ -253,7 +437,12 @@ const DebtManagementPlatform = () => {
       0
     );
     const unpaidExpenses = expenses
-      .filter((e) => !e.paid)
+      .filter(
+        (e) =>
+          !e.paid &&
+          ((e.isFixed && e.month === activeMonth) ||
+            (!e.isFixed && e.month === activeMonth))
+      )
       .reduce((sum, expense) => sum + expense.amount, 0);
 
     return {
@@ -265,13 +454,17 @@ const DebtManagementPlatform = () => {
     };
   };
 
-  const getMonthlySummary = (month) => {
+  const getMonthlySummary = (month, year) => {
     const monthExpenses = expenses.filter(
-      (expense) => expense.isFixed || expense.month === month
+      (expense) =>
+        (expense.isFixed && expense.month === month && expense.year === year) ||
+        (!expense.isFixed && expense.month === month && expense.year === year)
     );
 
     const monthIncomes = incomes.filter(
-      (income) => income.isFixed || income.month === month
+      (income) =>
+        (income.isFixed && income.month === month && income.year === year) ||
+        (!income.isFixed && income.month === month && income.year === year)
     );
 
     const totalExpenses = monthExpenses.reduce(
@@ -308,90 +501,110 @@ const DebtManagementPlatform = () => {
     };
   };
 
+  const deleteAdvancePayment = (debtId, paymentId) => {
+    const debt = debts.find((d) => d.id === debtId);
+    if (!debt || debt.type !== "fixed") return;
+
+    const payment = debt.payments.find((p) => p.id === paymentId);
+    if (!payment || payment.type !== "advance") return;
+
+    const updatedDebts = debts.map((d) => {
+      if (d.id === debtId) {
+        return {
+          ...d,
+          advancePayments: d.advancePayments - 1,
+          currentBalance:
+            d.monthlyPayment * (d.termMonths - d.advancePayments + 1),
+          payments: d.payments.filter((p) => p.id !== paymentId),
+        };
+      }
+      return d;
+    });
+
+    setDebts(updatedDebts);
+    localStorage.setItem("debts", JSON.stringify(updatedDebts));
+  };
+
+  const handleDelete = (type, id) => {
+    setDeleteType(type);
+    setItemToDelete(id);
+    setShowConfirmModal(true);
+  };
+
+  const confirmDelete = () => {
+    if (!itemToDelete || !deleteType) return;
+
+    switch (deleteType) {
+      case "debt":
+        deleteDebt(itemToDelete);
+        break;
+      case "expense":
+        deleteExpense(itemToDelete);
+        break;
+      case "income":
+        deleteIncome(itemToDelete);
+        break;
+      default:
+        break;
+    }
+
+    setShowConfirmModal(false);
+    setItemToDelete(null);
+    setDeleteType(null);
+  };
+
   const summary = getFinancialSummary();
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
+    <div className="min-h-screen bg-[#F2F2F7]">
       <div className="container mx-auto px-4 py-8">
-        <div className="text-center mb-8">
-          <h1 className="text-4xl font-bold text-gray-800 mb-2">
-            Gestión Financiera
-          </h1>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-          <div className="bg-white rounded-lg shadow-md p-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
+          <div className="bg-white rounded-2xl shadow-sm p-6 border border-gray-100">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-gray-600">Deuda Total</p>
-                <p className="text-2xl font-bold text-red-600">
+                <p className="text-sm font-medium text-[#8E8E93]">
+                  Deuda Total
+                </p>
+                <p className="text-2xl font-bold text-[#FF3B30]">
                   ${summary.totalDebt.toLocaleString()}
                 </p>
               </div>
-              <CreditCard className="h-8 w-8 text-red-500" />
+              <CreditCard className="h-8 w-8 text-[#FF3B30]" />
             </div>
           </div>
 
-          <div className="bg-white rounded-lg shadow-md p-6">
+          <div className="bg-white rounded-2xl shadow-sm p-6 border border-gray-100">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-gray-600">
+                <p className="text-sm font-medium text-[#8E8E93]">
                   Pagos Mensuales
                 </p>
-                <p className="text-2xl font-bold text-orange-600">
+                <p className="text-2xl font-bold text-[#FF9500]">
                   ${summary.totalMonthlyDebt.toLocaleString()}
                 </p>
               </div>
-              <Calculator className="h-8 w-8 text-orange-500" />
-            </div>
-          </div>
-
-          <div className="bg-white rounded-lg shadow-md p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600">
-                  Gastos Mensuales
-                </p>
-                <p className="text-2xl font-bold text-blue-600">
-                  ${summary.totalMonthlyExpenses.toLocaleString()}
-                </p>
-              </div>
-              <Receipt className="h-8 w-8 text-blue-500" />
-            </div>
-          </div>
-
-          <div className="bg-white rounded-lg shadow-md p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600">
-                  Gastos Pendientes
-                </p>
-                <p className="text-2xl font-bold text-purple-600">
-                  ${summary.unpaidExpenses.toLocaleString()}
-                </p>
-              </div>
-              <X className="h-8 w-8 text-purple-500" />
+              <Calculator className="h-8 w-8 text-[#FF9500]" />
             </div>
           </div>
         </div>
 
-        <div className="flex space-x-1 mb-6">
+        <div className="flex space-x-2 mb-6 bg-white rounded-2xl p-2 shadow-sm border border-gray-100">
           <button
             onClick={() => setActiveTab("debts")}
-            className={`px-6 py-3 rounded-lg font-medium transition-all ${
+            className={`flex-1 px-6 py-3 rounded-xl font-medium transition-all ${
               activeTab === "debts"
-                ? "bg-blue-600 text-white shadow-lg"
-                : "bg-white text-gray-600 hover:bg-gray-50"
+                ? "bg-[#007AFF] text-white shadow-sm"
+                : "text-[#007AFF] hover:bg-[#F2F2F7]"
             }`}
           >
             Deudas
           </button>
           <button
             onClick={() => setActiveTab("expenses")}
-            className={`px-6 py-3 rounded-lg font-medium transition-all ${
+            className={`flex-1 px-6 py-3 rounded-xl font-medium transition-all ${
               activeTab === "expenses"
-                ? "bg-blue-600 text-white shadow-lg"
-                : "bg-white text-gray-600 hover:bg-gray-50"
+                ? "bg-[#007AFF] text-white shadow-sm"
+                : "text-[#007AFF] hover:bg-[#F2F2F7]"
             }`}
           >
             Gastos
@@ -401,17 +614,17 @@ const DebtManagementPlatform = () => {
         {activeTab === "debts" && (
           <div className="space-y-6">
             <div className="flex justify-between items-center">
-              <h2 className="text-2xl font-bold text-gray-800">Mis Deudas</h2>
+              <h2 className="text-2xl font-bold text-[#000000]">Mis Deudas</h2>
               <button
                 onClick={() => setShowDebtModal(true)}
-                className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
+                className="bg-[#007AFF] text-white px-4 py-2 rounded-xl hover:bg-[#0066CC] transition-colors flex items-center gap-2 shadow-sm"
               >
                 <Plus className="h-4 w-4" />
                 Agregar Deuda
               </button>
             </div>
 
-            <div className="grid gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {debts.map((debt) => {
                 const nextPayment = calculateNextPayment(debt);
                 const progress =
@@ -421,14 +634,14 @@ const DebtManagementPlatform = () => {
                 return (
                   <div
                     key={debt.id}
-                    className="bg-white rounded-lg shadow-md p-6"
+                    className="bg-white rounded-2xl shadow-sm p-4 border border-gray-100"
                   >
-                    <div className="flex justify-between items-start mb-4">
+                    <div className="flex justify-between items-start mb-3">
                       <div>
-                        <h3 className="text-xl font-semibold text-gray-800">
+                        <h3 className="text-lg font-semibold text-[#000000]">
                           {debt.name}
                         </h3>
-                        <p className="text-sm text-gray-600">
+                        <p className="text-xs text-[#8E8E93]">
                           {debt.type === "interest"
                             ? "Con Interés"
                             : "Pago Fijo"}
@@ -438,84 +651,77 @@ const DebtManagementPlatform = () => {
                       </div>
                       <div className="flex gap-2">
                         <button
-                          onClick={() => {
-                            setSelectedDebt(debt);
-                            setShowPaymentModal(true);
-                          }}
-                          className="bg-green-600 text-white px-3 py-1 rounded text-sm hover:bg-green-700 transition-colors"
-                        >
-                          Pagar
-                        </button>
-                        <button
-                          onClick={() => deleteDebt(debt.id)}
-                          className="bg-red-600 text-white px-3 py-1 rounded text-sm hover:bg-red-700 transition-colors"
+                          onClick={() => handleDelete("debt", debt.id)}
+                          className="bg-[#FF3B30] text-white px-2 py-1 rounded-lg text-sm hover:bg-[#FF2D55] transition-colors shadow-sm"
                         >
                           <Trash2 className="h-4 w-4" />
                         </button>
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                    <div className="grid grid-cols-2 gap-3 mb-3">
                       <div>
-                        <p className="text-sm text-gray-600">Saldo Actual</p>
-                        <p className="text-lg font-bold text-red-600">
+                        <p className="text-xs text-[#8E8E93]">Saldo Actual</p>
+                        <p className="text-base font-bold text-[#FF3B30]">
                           ${debt.currentBalance.toLocaleString()}
                         </p>
                       </div>
                       <div>
-                        <p className="text-sm text-gray-600">Pago Mensual</p>
-                        <p className="text-lg font-bold text-blue-600">
+                        <p className="text-xs text-[#8E8E93]">Pago Mensual</p>
+                        <p className="text-base font-bold text-[#007AFF]">
                           ${debt.monthlyPayment.toLocaleString()}
                         </p>
                       </div>
                       <div>
-                        <p className="text-sm text-gray-600">
+                        <p className="text-xs text-[#8E8E93]">
                           {debt.type === "interest"
                             ? "Tasa de Interés"
                             : "Plazo"}
                         </p>
-                        <p className="text-lg font-bold text-gray-700">
+                        <p className="text-base font-bold text-[#000000]">
                           {debt.type === "interest"
                             ? `${debt.interestRate}%`
                             : `${debt.termMonths} meses`}
                         </p>
                       </div>
+                      <div>
+                        <p className="text-xs text-[#8E8E93]">Progreso</p>
+                        <p className="text-base font-bold text-[#000000]">
+                          {progress.toFixed(1)}%
+                        </p>
+                      </div>
                     </div>
 
-                    <div className="mb-4">
-                      <div className="flex justify-between text-sm text-gray-600 mb-1">
-                        <span>Progreso</span>
-                        <span>{progress.toFixed(1)}%</span>
-                      </div>
-                      <div className="w-full bg-gray-200 rounded-full h-2">
+                    <div className="mb-3">
+                      <div className="w-full bg-[#E5E5EA] rounded-full h-1.5">
                         <div
-                          className="bg-green-600 h-2 rounded-full transition-all"
+                          className="bg-[#34C759] h-1.5 rounded-full transition-all"
                           style={{ width: `${Math.min(progress, 100)}%` }}
                         ></div>
                       </div>
                     </div>
 
                     {debt.type === "interest" && debt.currentBalance > 0 && (
-                      <div className="bg-gray-50 rounded-lg p-4">
-                        <h4 className="font-medium text-gray-800 mb-2">
+                      <div className="bg-[#F2F2F7] rounded-xl p-3 mb-3">
+                        <h4 className="text-sm font-medium text-[#000000] mb-2">
                           Próximo Pago
                         </h4>
-                        <div className="grid grid-cols-3 gap-4 text-sm">
+                        <div className="grid grid-cols-3 gap-2 text-xs">
                           <div>
-                            <p className="text-gray-600">Interés</p>
-                            <p className="font-medium">
+                            <p className="text-[#8E8E93]">Interés</p>
+                            <p className="font-medium text-[#000000]">
                               ${nextPayment.interest.toFixed(2)}
                             </p>
                           </div>
                           <div>
-                            <p className="text-gray-600">Capital</p>
-                            <p className="font-medium">
+                            <p className="text-[#8E8E93]">Capital</p>
+                            <p className="font-medium text-[#000000]">
                               ${nextPayment.principal.toFixed(2)}
                             </p>
                           </div>
                           <div>
-                            <p className="text-gray-600">Nuevo Saldo</p>
-                            <p className="font-medium">
+                            <p className="text-[#8E8E93]">Nuevo Saldo</p>
+                            <p className="font-medium text-[#000000]">
                               ${nextPayment.newBalance.toFixed(2)}
                             </p>
                           </div>
@@ -523,24 +729,62 @@ const DebtManagementPlatform = () => {
                       </div>
                     )}
 
+                    {debt.type === "fixed" && (
+                      <div className="mt-3">
+                        <button
+                          onClick={() => {
+                            setSelectedDebtForAdvance(debt);
+                            setShowAdvancePaymentModal(true);
+                          }}
+                          className="w-full bg-[#34C759] text-white px-3 py-1.5 rounded-xl hover:bg-[#30B350] transition-colors flex items-center justify-center gap-2 text-sm shadow-sm"
+                        >
+                          <DollarSign className="h-4 w-4" />
+                          Pagar Letra(s) Adelantada(s)
+                        </button>
+                      </div>
+                    )}
+
                     {debt.payments.length > 0 && (
-                      <div className="mt-4">
-                        <h4 className="font-medium text-gray-800 mb-2">
-                          Últimos Pagos
+                      <div className="mt-3">
+                        <h4 className="text-sm font-medium text-[#000000] mb-2">
+                          Historial de Pagos
                         </h4>
-                        <div className="space-y-2 max-h-32 overflow-y-auto">
-                          {debt.payments.slice(-3).map((payment) => (
+                        <div className="space-y-1 max-h-32 overflow-y-auto">
+                          {debt.payments.map((payment) => (
                             <div
                               key={payment.id}
-                              className="flex justify-between text-sm"
+                              className="flex justify-between items-center text-xs p-1.5 hover:bg-[#F2F2F7] rounded-lg group"
                             >
-                              <span>{payment.date}</span>
-                              <span className="font-medium">
-                                ${payment.amount.toLocaleString()}
-                              </span>
-                              <span className="text-gray-600 capitalize">
-                                {payment.type}
-                              </span>
+                              <div className="flex items-center gap-2">
+                                <span className="text-[#8E8E93]">
+                                  {payment.date}
+                                </span>
+                                <span className="font-medium text-[#000000]">
+                                  ${payment.amount.toLocaleString()}
+                                </span>
+                                <span
+                                  className={`text-[#8E8E93] capitalize ${
+                                    payment.type === "advance"
+                                      ? "text-[#34C759]"
+                                      : ""
+                                  }`}
+                                >
+                                  {payment.type === "advance"
+                                    ? "Letra Adelantada"
+                                    : payment.type}
+                                </span>
+                              </div>
+                              {payment.type === "advance" && (
+                                <button
+                                  onClick={() =>
+                                    deleteAdvancePayment(debt.id, payment.id)
+                                  }
+                                  className="text-[#FF3B30] hover:text-[#FF2D55] transition-colors opacity-0 group-hover:opacity-100"
+                                  title="Eliminar pago adelantado"
+                                >
+                                  <Trash2 className="h-3 w-3" />
+                                </button>
+                              )}
                             </div>
                           ))}
                         </div>
@@ -556,20 +800,20 @@ const DebtManagementPlatform = () => {
         {activeTab === "expenses" && (
           <div className="space-y-6">
             <div className="flex justify-between items-center">
-              <h2 className="text-2xl font-bold text-gray-800">
+              <h2 className="text-2xl font-bold text-[#000000]">
                 Gestión de Gastos e Ingresos
               </h2>
               <div className="flex gap-2">
                 <button
                   onClick={() => setShowIncomeModal(true)}
-                  className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2"
+                  className="bg-[#34C759] text-white px-4 py-2 rounded-xl hover:bg-[#30B350] transition-colors flex items-center gap-2 shadow-sm"
                 >
                   <DollarSign className="h-4 w-4" />
                   Agregar Ingreso
                 </button>
                 <button
                   onClick={() => setShowExpenseModal(true)}
-                  className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
+                  className="bg-[#007AFF] text-white px-4 py-2 rounded-xl hover:bg-[#0066CC] transition-colors flex items-center gap-2 shadow-sm"
                 >
                   <Plus className="h-4 w-4" />
                   Agregar Gasto
@@ -577,29 +821,115 @@ const DebtManagementPlatform = () => {
               </div>
             </div>
 
-            <div className="overflow-x-auto">
-              <div className="flex space-x-2 pb-2">
-                {months.map((month, index) => (
-                  <button
-                    key={month}
-                    onClick={() => setActiveMonth(index)}
-                    className={`px-4 py-2 rounded-lg font-medium whitespace-nowrap transition-all ${
-                      activeMonth === index
-                        ? "bg-blue-600 text-white shadow-lg"
-                        : "bg-white text-gray-600 hover:bg-gray-50"
-                    }`}
-                  >
-                    {month}
-                  </button>
-                ))}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+              <div className="bg-white rounded-2xl shadow-sm p-6 border border-gray-100">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-[#8E8E93]">
+                      Gastos Mensuales
+                    </p>
+                    <p className="text-2xl font-bold text-[#007AFF]">
+                      $
+                      {getMonthlySummary(
+                        activeMonth,
+                        activeYear
+                      ).totalExpenses.toLocaleString()}
+                    </p>
+                  </div>
+                  <Receipt className="h-8 w-8 text-[#007AFF]" />
+                </div>
+              </div>
+
+              <div className="bg-white rounded-2xl shadow-sm p-6 border border-gray-100">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-[#8E8E93]">
+                      Gastos Pendientes
+                    </p>
+                    <p className="text-2xl font-bold text-[#FF9500]">
+                      $
+                      {expenses
+                        .filter(
+                          (e) =>
+                            !e.paid &&
+                            ((e.isFixed &&
+                              e.month === activeMonth &&
+                              e.year === activeYear) ||
+                              (!e.isFixed &&
+                                e.month === activeMonth &&
+                                e.year === activeYear))
+                        )
+                        .reduce((sum, expense) => sum + expense.amount, 0)
+                        .toLocaleString()}
+                    </p>
+                  </div>
+                  <X className="h-8 w-8 text-[#FF9500]" />
+                </div>
+              </div>
+
+              <div className="bg-white rounded-2xl shadow-sm p-6 border border-gray-100">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-[#8E8E93]">
+                      Balance del Mes
+                    </p>
+                    <p
+                      className={`text-2xl font-bold ${
+                        getMonthlySummary(activeMonth, activeYear).balance >= 0
+                          ? "text-[#34C759]"
+                          : "text-[#FF3B30]"
+                      }`}
+                    >
+                      $
+                      {getMonthlySummary(
+                        activeMonth,
+                        activeYear
+                      ).balance.toLocaleString()}
+                    </p>
+                  </div>
+                  <Calculator className="h-8 w-8 text-[#8E8E93]" />
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-col space-y-2">
+              <div className="flex justify-end">
+                <select
+                  value={activeYear}
+                  onChange={(e) => setActiveYear(parseInt(e.target.value))}
+                  className="px-4 py-2 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#007AFF] focus:border-transparent bg-white"
+                >
+                  {getYearRange().map((year) => (
+                    <option key={year} value={year}>
+                      {year}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="overflow-x-auto">
+                <div className="flex space-x-2 pb-2">
+                  {months.map((month, index) => (
+                    <button
+                      key={month}
+                      onClick={() => setActiveMonth(index)}
+                      className={`px-4 py-2 rounded-xl font-medium whitespace-nowrap transition-all ${
+                        activeMonth === index
+                          ? "bg-[#007AFF] text-white shadow-sm"
+                          : "bg-white text-[#007AFF] hover:bg-[#F2F2F7] border border-gray-200"
+                      }`}
+                    >
+                      {month}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <div className="md:col-span-2">
-                <div className="bg-white rounded-lg shadow-md p-6">
-                  <h3 className="text-lg font-semibold mb-4">
-                    Movimientos de {months[activeMonth]}
+                <div className="bg-white rounded-2xl shadow-sm p-6 border border-gray-100">
+                  <h3 className="text-lg font-semibold mb-4 text-[#000000]">
+                    Movimientos de {months[activeMonth]} {activeYear}
                   </h3>
 
                   <div className="space-y-4">
@@ -607,19 +937,21 @@ const DebtManagementPlatform = () => {
                     {incomes
                       .filter(
                         (income) =>
-                          income.isFixed || income.month === activeMonth
+                          income.isFixed ||
+                          (income.month === activeMonth &&
+                            income.year === activeYear)
                       )
                       .map((income) => (
                         <div
                           key={income.id}
-                          className="flex justify-between items-center p-4 bg-green-50 rounded-lg"
+                          className="flex justify-between items-center p-4 bg-[#F2F2F7] rounded-xl"
                         >
                           <div className="flex items-center gap-3">
                             <div>
-                              <h3 className="font-medium text-gray-800">
+                              <h3 className="font-medium text-[#000000]">
                                 {income.name}
                                 {income.isFixed && (
-                                  <span className="ml-2 text-xs bg-green-100 text-green-800 px-2 py-1 rounded">
+                                  <span className="ml-2 text-xs bg-[#34C759]/10 text-[#34C759] px-2 py-1 rounded-lg">
                                     Fijo
                                   </span>
                                 )}
@@ -627,12 +959,12 @@ const DebtManagementPlatform = () => {
                             </div>
                           </div>
                           <div className="flex items-center gap-3">
-                            <p className="font-bold text-green-600">
+                            <p className="font-bold text-[#34C759]">
                               +${income.amount.toLocaleString()}
                             </p>
                             <button
-                              onClick={() => deleteIncome(income.id)}
-                              className="text-red-600 hover:text-red-800 transition-colors"
+                              onClick={() => handleDelete("income", income.id)}
+                              className="text-[#FF3B30] hover:text-[#FF2D55] transition-colors"
                             >
                               <Trash2 className="h-4 w-4" />
                             </button>
@@ -644,20 +976,25 @@ const DebtManagementPlatform = () => {
                     {expenses
                       .filter(
                         (expense) =>
-                          expense.isFixed || expense.month === activeMonth
+                          (expense.isFixed &&
+                            expense.month === activeMonth &&
+                            expense.year === activeYear) ||
+                          (!expense.isFixed &&
+                            expense.month === activeMonth &&
+                            expense.year === activeYear)
                       )
                       .map((expense) => (
                         <div
                           key={expense.id}
-                          className="flex justify-between items-center p-4 bg-gray-50 rounded-lg"
+                          className="flex justify-between items-center p-4 bg-[#F2F2F7] rounded-xl"
                         >
                           <div className="flex items-center gap-3">
                             <button
                               onClick={() => toggleExpensePaid(expense.id)}
                               className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors ${
                                 expense.paid
-                                  ? "bg-green-600 border-green-600 text-white"
-                                  : "border-gray-300 hover:border-green-500"
+                                  ? "bg-[#34C759] border-[#34C759] text-white"
+                                  : "border-[#8E8E93] hover:border-[#34C759]"
                               }`}
                             >
                               {expense.paid && <Check className="h-4 w-4" />}
@@ -666,36 +1003,47 @@ const DebtManagementPlatform = () => {
                               <h3
                                 className={`font-medium ${
                                   expense.paid
-                                    ? "line-through text-gray-500"
-                                    : "text-gray-800"
+                                    ? "line-through text-[#8E8E93]"
+                                    : "text-[#000000]"
                                 }`}
                               >
                                 {expense.name}
                                 {expense.isFixed && (
-                                  <span className="ml-2 text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">
+                                  <span className="ml-2 text-xs bg-[#007AFF]/10 text-[#007AFF] px-2 py-1 rounded-lg">
                                     Fijo
                                   </span>
                                 )}
+                                {expense.isDebtPayment && (
+                                  <span className="ml-2 text-xs bg-[#FF9500]/10 text-[#FF9500] px-2 py-1 rounded-lg">
+                                    Pago de Deuda
+                                  </span>
+                                )}
                               </h3>
-                              <p className="text-sm text-gray-600">
-                                {expense.category}
-                              </p>
+                              <div className="flex items-center gap-2 text-sm text-[#8E8E93]">
+                                <span>{expense.category}</span>
+                              </div>
                             </div>
                           </div>
                           <div className="flex items-center gap-3">
                             <p
                               className={`font-bold ${
-                                expense.paid ? "text-gray-500" : "text-blue-600"
+                                expense.paid
+                                  ? "text-[#8E8E93]"
+                                  : "text-[#007AFF]"
                               }`}
                             >
                               -${expense.amount.toLocaleString()}
                             </p>
-                            <button
-                              onClick={() => deleteExpense(expense.id)}
-                              className="text-red-600 hover:text-red-800 transition-colors"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </button>
+                            {!expense.isDebtPayment && (
+                              <button
+                                onClick={() =>
+                                  handleDelete("expense", expense.id)
+                                }
+                                className="text-[#FF3B30] hover:text-[#FF2D55] transition-colors"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            )}
                           </div>
                         </div>
                       ))}
@@ -703,49 +1051,49 @@ const DebtManagementPlatform = () => {
                 </div>
               </div>
 
-              <div className="bg-white rounded-lg shadow-md p-6">
-                <h3 className="text-lg font-semibold mb-4">
-                  Resumen de {months[activeMonth]}
+              <div className="bg-white rounded-2xl shadow-sm p-6 border border-gray-100">
+                <h3 className="text-lg font-semibold mb-4 text-[#000000]">
+                  Resumen de {months[activeMonth]} {activeYear}
                 </h3>
                 {(() => {
-                  const summary = getMonthlySummary(activeMonth);
+                  const summary = getMonthlySummary(activeMonth, activeYear);
                   return (
                     <div className="space-y-4">
                       <div>
-                        <p className="text-sm text-gray-600">Ingresos Fijos</p>
-                        <p className="text-xl font-bold text-green-600">
+                        <p className="text-sm text-[#8E8E93]">Ingresos Fijos</p>
+                        <p className="text-xl font-bold text-[#34C759]">
                           +${summary.fixedIncomeTotal.toLocaleString()}
                         </p>
                       </div>
                       <div>
-                        <p className="text-sm text-gray-600">
+                        <p className="text-sm text-[#8E8E93]">
                           Ingresos Variables
                         </p>
-                        <p className="text-xl font-bold text-green-600">
+                        <p className="text-xl font-bold text-[#34C759]">
                           +${summary.variableIncomeTotal.toLocaleString()}
                         </p>
                       </div>
-                      <div className="pt-4 border-t">
-                        <p className="text-sm text-gray-600">Gastos Fijos</p>
-                        <p className="text-xl font-bold text-blue-600">
+                      <div className="pt-4 border-t border-[#E5E5EA]">
+                        <p className="text-sm text-[#8E8E93]">Gastos Fijos</p>
+                        <p className="text-xl font-bold text-[#007AFF]">
                           -${summary.fixedTotal.toLocaleString()}
                         </p>
                       </div>
                       <div>
-                        <p className="text-sm text-gray-600">
+                        <p className="text-sm text-[#8E8E93]">
                           Gastos Variables
                         </p>
-                        <p className="text-xl font-bold text-blue-600">
+                        <p className="text-xl font-bold text-[#007AFF]">
                           -${summary.variableTotal.toLocaleString()}
                         </p>
                       </div>
-                      <div className="pt-4 border-t">
-                        <p className="text-sm text-gray-600">Balance</p>
+                      <div className="pt-4 border-t border-[#E5E5EA]">
+                        <p className="text-sm text-[#8E8E93]">Balance</p>
                         <p
                           className={`text-2xl font-bold ${
                             summary.balance >= 0
-                              ? "text-green-600"
-                              : "text-red-600"
+                              ? "text-[#34C759]"
+                              : "text-[#FF3B30]"
                           }`}
                         >
                           {summary.balance >= 0 ? "+" : ""}$
@@ -762,8 +1110,8 @@ const DebtManagementPlatform = () => {
 
         {showDebtModal && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-lg p-6 w-full max-w-md mx-4">
-              <h3 className="text-lg font-semibold mb-4">
+            <div className="bg-white rounded-2xl p-6 w-full max-w-md mx-4 shadow-lg">
+              <h3 className="text-lg font-semibold mb-4 text-[#000000]">
                 Agregar Nueva Deuda
               </h3>
 
@@ -775,7 +1123,7 @@ const DebtManagementPlatform = () => {
                   onChange={(e) =>
                     setDebtForm({ ...debtForm, name: e.target.value })
                   }
-                  className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#007AFF] focus:border-transparent"
                 />
 
                 <select
@@ -783,7 +1131,7 @@ const DebtManagementPlatform = () => {
                   onChange={(e) =>
                     setDebtForm({ ...debtForm, type: e.target.value })
                   }
-                  className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#007AFF] focus:border-transparent"
                 >
                   <option value="interest">
                     Con Interés (ej. auto, hipoteca)
@@ -800,7 +1148,7 @@ const DebtManagementPlatform = () => {
                   onChange={(e) =>
                     setDebtForm({ ...debtForm, principal: e.target.value })
                   }
-                  className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#007AFF] focus:border-transparent"
                 />
 
                 <input
@@ -810,7 +1158,7 @@ const DebtManagementPlatform = () => {
                   onChange={(e) =>
                     setDebtForm({ ...debtForm, currentBalance: e.target.value })
                   }
-                  className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#007AFF] focus:border-transparent"
                 />
 
                 {debtForm.type === "interest" && (
@@ -822,7 +1170,7 @@ const DebtManagementPlatform = () => {
                     onChange={(e) =>
                       setDebtForm({ ...debtForm, interestRate: e.target.value })
                     }
-                    className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    className="w-full p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#007AFF] focus:border-transparent"
                   />
                 )}
 
@@ -833,7 +1181,7 @@ const DebtManagementPlatform = () => {
                   onChange={(e) =>
                     setDebtForm({ ...debtForm, termMonths: e.target.value })
                   }
-                  className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#007AFF] focus:border-transparent"
                 />
 
                 <input
@@ -843,21 +1191,21 @@ const DebtManagementPlatform = () => {
                   onChange={(e) =>
                     setDebtForm({ ...debtForm, monthlyPayment: e.target.value })
                   }
-                  className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#007AFF] focus:border-transparent"
                 />
 
                 {debtForm.type === "fixed" && (
                   <input
                     type="number"
-                    placeholder="Letras adelantadas (opcional)"
-                    value={debtForm.advancePayments}
+                    placeholder="Monto letra adelantada"
+                    value={debtForm.advancePaymentAmount}
                     onChange={(e) =>
                       setDebtForm({
                         ...debtForm,
-                        advancePayments: e.target.value,
+                        advancePaymentAmount: e.target.value,
                       })
                     }
-                    className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    className="w-full p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#007AFF] focus:border-transparent"
                   />
                 )}
               </div>
@@ -865,7 +1213,7 @@ const DebtManagementPlatform = () => {
               <div className="flex gap-3 mt-6">
                 <button
                   onClick={() => setShowDebtModal(false)}
-                  className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                  className="flex-1 px-4 py-2 border border-gray-200 rounded-xl hover:bg-[#F2F2F7] transition-colors text-[#007AFF]"
                 >
                   Cancelar
                 </button>
@@ -876,7 +1224,7 @@ const DebtManagementPlatform = () => {
                     !debtForm.principal ||
                     !debtForm.currentBalance
                   }
-                  className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  className="flex-1 px-4 py-2 bg-[#007AFF] text-white rounded-xl hover:bg-[#0066CC] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
                   Agregar
                 </button>
@@ -887,8 +1235,8 @@ const DebtManagementPlatform = () => {
 
         {showExpenseModal && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-lg p-6 w-full max-w-md mx-4">
-              <h3 className="text-lg font-semibold mb-4">
+            <div className="bg-white rounded-2xl p-6 w-full max-w-md mx-4 shadow-lg">
+              <h3 className="text-lg font-semibold mb-4 text-[#000000]">
                 Agregar Nuevo Gasto
               </h3>
 
@@ -900,7 +1248,7 @@ const DebtManagementPlatform = () => {
                   onChange={(e) =>
                     setExpenseForm({ ...expenseForm, name: e.target.value })
                   }
-                  className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#007AFF] focus:border-transparent"
                 />
 
                 <input
@@ -910,15 +1258,18 @@ const DebtManagementPlatform = () => {
                   onChange={(e) =>
                     setExpenseForm({ ...expenseForm, amount: e.target.value })
                   }
-                  className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#007AFF] focus:border-transparent"
                 />
 
                 <select
                   value={expenseForm.category}
                   onChange={(e) =>
-                    setExpenseForm({ ...expenseForm, category: e.target.value })
+                    setExpenseForm({
+                      ...expenseForm,
+                      category: e.target.value,
+                    })
                   }
-                  className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#007AFF] focus:border-transparent"
                 >
                   {categories.map((category) => (
                     <option key={category} value={category}>
@@ -938,44 +1289,62 @@ const DebtManagementPlatform = () => {
                         isFixed: e.target.checked,
                       })
                     }
-                    className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                    className="w-4 h-4 text-[#007AFF] border-gray-300 rounded focus:ring-[#007AFF]"
                   />
-                  <label htmlFor="isFixed" className="text-sm text-gray-600">
+                  <label htmlFor="isFixed" className="text-sm text-[#8E8E93]">
                     Gasto Fijo (se aplica a todos los meses)
                   </label>
                 </div>
 
                 {!expenseForm.isFixed && (
-                  <select
-                    value={expenseForm.month}
-                    onChange={(e) =>
-                      setExpenseForm({
-                        ...expenseForm,
-                        month: parseInt(e.target.value),
-                      })
-                    }
-                    className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  >
-                    {months.map((month, index) => (
-                      <option key={month} value={index}>
-                        {month}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="space-y-4">
+                    <select
+                      value={expenseForm.month}
+                      onChange={(e) =>
+                        setExpenseForm({
+                          ...expenseForm,
+                          month: parseInt(e.target.value),
+                        })
+                      }
+                      className="w-full p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#007AFF] focus:border-transparent"
+                    >
+                      {months.map((month, index) => (
+                        <option key={month} value={index}>
+                          {month}
+                        </option>
+                      ))}
+                    </select>
+                    <select
+                      value={expenseForm.year}
+                      onChange={(e) =>
+                        setExpenseForm({
+                          ...expenseForm,
+                          year: parseInt(e.target.value),
+                        })
+                      }
+                      className="w-full p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#007AFF] focus:border-transparent"
+                    >
+                      {getYearRange().map((year) => (
+                        <option key={year} value={year}>
+                          {year}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 )}
               </div>
 
               <div className="flex gap-3 mt-6">
                 <button
                   onClick={() => setShowExpenseModal(false)}
-                  className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                  className="flex-1 px-4 py-2 border border-gray-200 rounded-xl hover:bg-[#F2F2F7] transition-colors text-[#007AFF]"
                 >
                   Cancelar
                 </button>
                 <button
                   onClick={addExpense}
                   disabled={!expenseForm.name || !expenseForm.amount}
-                  className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  className="flex-1 px-4 py-2 bg-[#007AFF] text-white rounded-xl hover:bg-[#0066CC] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
                   Agregar
                 </button>
@@ -984,93 +1353,10 @@ const DebtManagementPlatform = () => {
           </div>
         )}
 
-        {showPaymentModal && selectedDebt && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-lg p-6 w-full max-w-md mx-4">
-              <h3 className="text-lg font-semibold mb-4">
-                Registrar Pago - {selectedDebt.name}
-              </h3>
-
-              <div className="space-y-4">
-                <input
-                  type="number"
-                  placeholder="Monto del pago"
-                  value={paymentForm.amount}
-                  onChange={(e) =>
-                    setPaymentForm({ ...paymentForm, amount: e.target.value })
-                  }
-                  className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                />
-
-                <input
-                  type="date"
-                  value={paymentForm.date}
-                  onChange={(e) =>
-                    setPaymentForm({ ...paymentForm, date: e.target.value })
-                  }
-                  className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                />
-
-                <select
-                  value={paymentForm.type}
-                  onChange={(e) =>
-                    setPaymentForm({ ...paymentForm, type: e.target.value })
-                  }
-                  className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                >
-                  <option value="payment">Pago Regular</option>
-                  <option value="contribution">Aportación Extra</option>
-                </select>
-
-                <div className="bg-gray-50 p-3 rounded-lg">
-                  <p className="text-sm text-gray-600">
-                    Saldo actual:{" "}
-                    <span className="font-medium">
-                      ${selectedDebt.currentBalance.toLocaleString()}
-                    </span>
-                  </p>
-                  {paymentForm.amount && (
-                    <p className="text-sm text-gray-600">
-                      Nuevo saldo:{" "}
-                      <span className="font-medium">
-                        $
-                        {Math.max(
-                          0,
-                          selectedDebt.currentBalance -
-                            parseFloat(paymentForm.amount)
-                        ).toLocaleString()}
-                      </span>
-                    </p>
-                  )}
-                </div>
-              </div>
-
-              <div className="flex gap-3 mt-6">
-                <button
-                  onClick={() => {
-                    setShowPaymentModal(false);
-                    setSelectedDebt(null);
-                  }}
-                  className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
-                >
-                  Cancelar
-                </button>
-                <button
-                  onClick={addPayment}
-                  disabled={!paymentForm.amount}
-                  className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                >
-                  Registrar Pago
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
         {showIncomeModal && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-lg p-6 w-full max-w-md mx-4">
-              <h3 className="text-lg font-semibold mb-4">
+            <div className="bg-white rounded-2xl p-6 w-full max-w-md mx-4 shadow-lg">
+              <h3 className="text-lg font-semibold mb-4 text-[#000000]">
                 Agregar Nuevo Ingreso
               </h3>
 
@@ -1082,7 +1368,7 @@ const DebtManagementPlatform = () => {
                   onChange={(e) =>
                     setIncomeForm({ ...incomeForm, name: e.target.value })
                   }
-                  className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#007AFF] focus:border-transparent"
                 />
 
                 <input
@@ -1092,7 +1378,7 @@ const DebtManagementPlatform = () => {
                   onChange={(e) =>
                     setIncomeForm({ ...incomeForm, amount: e.target.value })
                   }
-                  className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#007AFF] focus:border-transparent"
                 />
 
                 <div className="flex items-center gap-2">
@@ -1106,49 +1392,189 @@ const DebtManagementPlatform = () => {
                         isFixed: e.target.checked,
                       })
                     }
-                    className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                    className="w-4 h-4 text-[#007AFF] border-gray-300 rounded focus:ring-[#007AFF]"
                   />
                   <label
                     htmlFor="isFixedIncome"
-                    className="text-sm text-gray-600"
+                    className="text-sm text-[#8E8E93]"
                   >
                     Ingreso Fijo (se aplica a todos los meses)
                   </label>
                 </div>
 
                 {!incomeForm.isFixed && (
-                  <select
-                    value={incomeForm.month}
-                    onChange={(e) =>
-                      setIncomeForm({
-                        ...incomeForm,
-                        month: parseInt(e.target.value),
-                      })
-                    }
-                    className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  >
-                    {months.map((month, index) => (
-                      <option key={month} value={index}>
-                        {month}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="space-y-4">
+                    <select
+                      value={incomeForm.month}
+                      onChange={(e) =>
+                        setIncomeForm({
+                          ...incomeForm,
+                          month: parseInt(e.target.value),
+                        })
+                      }
+                      className="w-full p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#007AFF] focus:border-transparent"
+                    >
+                      {months.map((month, index) => (
+                        <option key={month} value={index}>
+                          {month}
+                        </option>
+                      ))}
+                    </select>
+                    <select
+                      value={incomeForm.year}
+                      onChange={(e) =>
+                        setIncomeForm({
+                          ...incomeForm,
+                          year: parseInt(e.target.value),
+                        })
+                      }
+                      className="w-full p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#007AFF] focus:border-transparent"
+                    >
+                      {getYearRange().map((year) => (
+                        <option key={year} value={year}>
+                          {year}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 )}
               </div>
 
               <div className="flex gap-3 mt-6">
                 <button
                   onClick={() => setShowIncomeModal(false)}
-                  className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                  className="flex-1 px-4 py-2 border border-gray-200 rounded-xl hover:bg-[#F2F2F7] transition-colors text-[#007AFF]"
                 >
                   Cancelar
                 </button>
                 <button
                   onClick={addIncome}
                   disabled={!incomeForm.name || !incomeForm.amount}
-                  className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  className="flex-1 px-4 py-2 bg-[#34C759] text-white rounded-xl hover:bg-[#30B350] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
                   Agregar
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showAdvancePaymentModal && selectedDebtForAdvance && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-2xl p-6 w-full max-w-md mx-4 shadow-lg">
+              <h3 className="text-lg font-semibold mb-4 text-[#000000]">
+                Pagar Letras Adelantadas
+              </h3>
+
+              <div className="space-y-4">
+                <div>
+                  <p className="text-sm text-[#8E8E93] mb-1">
+                    Deuda: {selectedDebtForAdvance.name}
+                  </p>
+                  <p className="text-sm text-[#8E8E93] mb-1">
+                    Monto por letra: $
+                    {selectedDebtForAdvance.advancePaymentAmount.toLocaleString()}
+                  </p>
+                  <p className="text-sm text-[#8E8E93]">
+                    Letras pagadas: {selectedDebtForAdvance.advancePayments} de{" "}
+                    {selectedDebtForAdvance.termMonths}
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-[#000000] mb-1">
+                    Número de letras a pagar
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    max={
+                      selectedDebtForAdvance.termMonths -
+                      selectedDebtForAdvance.advancePayments
+                    }
+                    value={advancePaymentCount}
+                    onChange={(e) =>
+                      setAdvancePaymentCount(
+                        Math.min(
+                          parseInt(e.target.value) || 1,
+                          selectedDebtForAdvance.termMonths -
+                            selectedDebtForAdvance.advancePayments
+                        )
+                      )
+                    }
+                    className="w-full p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#007AFF] focus:border-transparent"
+                  />
+                </div>
+
+                <div className="pt-2">
+                  <p className="text-sm font-medium text-[#000000]">
+                    Total a pagar: $
+                    {(
+                      selectedDebtForAdvance.advancePaymentAmount *
+                      advancePaymentCount
+                    ).toLocaleString()}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex gap-3 mt-6">
+                <button
+                  onClick={() => {
+                    setShowAdvancePaymentModal(false);
+                    setSelectedDebtForAdvance(null);
+                    setAdvancePaymentCount(1);
+                  }}
+                  className="flex-1 px-4 py-2 border border-gray-200 rounded-xl hover:bg-[#F2F2F7] transition-colors text-[#007AFF]"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={() =>
+                    payAdvancePayment(
+                      selectedDebtForAdvance.id,
+                      advancePaymentCount
+                    )
+                  }
+                  className="flex-1 px-4 py-2 bg-[#34C759] text-white rounded-xl hover:bg-[#30B350] transition-colors"
+                >
+                  Pagar
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showConfirmModal && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-2xl p-6 w-full max-w-md mx-4 shadow-lg">
+              <h3 className="text-lg font-semibold mb-4 text-[#000000]">
+                Confirmar Eliminación
+              </h3>
+              <p className="text-[#8E8E93] mb-6">
+                ¿Estás seguro que deseas eliminar este{" "}
+                {deleteType === "debt"
+                  ? "deuda"
+                  : deleteType === "expense"
+                  ? "gasto"
+                  : "ingreso"}
+                ? Esta acción no se puede deshacer.
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => {
+                    setShowConfirmModal(false);
+                    setItemToDelete(null);
+                    setDeleteType(null);
+                  }}
+                  className="flex-1 px-4 py-2 border border-gray-200 rounded-xl hover:bg-[#F2F2F7] transition-colors text-[#007AFF]"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={confirmDelete}
+                  className="flex-1 px-4 py-2 bg-[#FF3B30] text-white rounded-xl hover:bg-[#FF2D55] transition-colors"
+                >
+                  Eliminar
                 </button>
               </div>
             </div>
