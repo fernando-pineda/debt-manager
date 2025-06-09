@@ -5,6 +5,7 @@ import {
   Check,
   CreditCard,
   DollarSign,
+  Minus,
   PiggyBank,
   Plus,
   Receipt,
@@ -46,6 +47,7 @@ const DebtManagementPlatform = () => {
     useState(false);
   const [showSavingsModal, setShowSavingsModal] = useState(false);
   const [showAddFundsModal, setShowAddFundsModal] = useState(false);
+  const [showSubtractFundsModal, setShowSubtractFundsModal] = useState(false);
   const [selectedCategoryId, setSelectedCategoryId] = useState(null);
   const [newSavingsCategory, setNewSavingsCategory] = useState("");
   const [savingsForm, setSavingsForm] = useState({
@@ -710,6 +712,38 @@ const DebtManagementPlatform = () => {
     const updatedSavings = savings.filter((saving) => saving.id !== id);
     setSavings(updatedSavings);
     localStorage.setItem("savings", JSON.stringify(updatedSavings));
+  };
+
+  const subtractFundsFromCategory = () => {
+    if (!selectedCategoryId || !savingsForm.amount) return;
+
+    const categoryTotal = savings
+      .filter((s) => s.categoryId === parseInt(selectedCategoryId))
+      .reduce((sum, s) => sum + s.amount, 0);
+
+    if (parseFloat(savingsForm.amount) > categoryTotal) {
+      alert("No puedes restar más del monto actual");
+      return;
+    }
+
+    const newSaving = {
+      id: Date.now(),
+      categoryId: parseInt(selectedCategoryId),
+      amount: -parseFloat(savingsForm.amount),
+    };
+
+    const updatedSavings = [...savings, newSaving];
+    setSavings(updatedSavings);
+    localStorage.setItem("savings", JSON.stringify(updatedSavings));
+
+    setSavingsForm({
+      categoryId: "",
+      amount: "",
+      month: activeMonth,
+      year: activeYear,
+    });
+    setSelectedCategoryId(null);
+    setShowSubtractFundsModal(false);
   };
 
   const summary = getFinancialSummary();
@@ -1469,6 +1503,15 @@ const DebtManagementPlatform = () => {
                           <Plus className="h-4 w-4" />
                         </button>
                         <button
+                          onClick={() => {
+                            setSelectedCategoryId(category.id);
+                            setShowSubtractFundsModal(true);
+                          }}
+                          className="text-[#FF9500] hover:text-[#FF8000] transition-colors"
+                        >
+                          <Minus className="h-4 w-4" />
+                        </button>
+                        <button
                           onClick={() =>
                             handleDelete("savingsCategory", category.id)
                           }
@@ -2130,6 +2173,53 @@ const DebtManagementPlatform = () => {
                   className="flex-1 px-4 py-2 bg-[#34C759] text-white rounded-xl hover:bg-[#30B350] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
                   Añadir
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showSubtractFundsModal && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-2xl p-6 w-full max-w-md mx-4 shadow-lg">
+              <h3 className="text-lg font-semibold mb-4 text-[#000000]">
+                Restar Fondos
+              </h3>
+
+              <div className="space-y-4">
+                <input
+                  type="number"
+                  placeholder="Monto"
+                  value={savingsForm.amount}
+                  onChange={(e) =>
+                    setSavingsForm({ ...savingsForm, amount: e.target.value })
+                  }
+                  className="w-full p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#007AFF] focus:border-transparent"
+                />
+              </div>
+
+              <div className="flex gap-3 mt-6">
+                <button
+                  onClick={() => {
+                    setShowSubtractFundsModal(false);
+                    setSavingsForm({
+                      categoryId: "",
+                      amount: "",
+                      month: activeMonth,
+                      year: activeYear,
+                    });
+                    setSelectedCategoryId(null);
+                  }}
+                  className="flex-1 px-4 py-2 border border-gray-200 rounded-xl hover:bg-[#F2F2F7] transition-colors text-[#007AFF]"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={subtractFundsFromCategory}
+                  disabled={!savingsForm.amount}
+                  className="flex-1 px-4 py-2 bg-[#FF9500] text-white rounded-xl hover:bg-[#FF8000] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  Restar
                 </button>
               </div>
             </div>
