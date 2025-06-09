@@ -1,3 +1,5 @@
+import "react-datepicker/dist/react-datepicker.css";
+
 import {
   Calculator,
   Check,
@@ -10,6 +12,8 @@ import {
   X,
 } from "lucide-react";
 import React, { useState } from "react";
+
+import DatePicker from "react-datepicker";
 
 const DebtManagementPlatform = () => {
   const [activeTab, setActiveTab] = useState("expenses");
@@ -54,6 +58,13 @@ const DebtManagementPlatform = () => {
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [itemToDelete, setItemToDelete] = useState(null);
   const [deleteType, setDeleteType] = useState(null);
+  const [showPaymentDateModal, setShowPaymentDateModal] = useState(false);
+  const [selectedExpenseForPayment, setSelectedExpenseForPayment] =
+    useState(null);
+  const [paymentDate, setPaymentDate] = useState(() => {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  });
 
   const [debtForm, setDebtForm] = useState({
     name: "",
@@ -305,8 +316,19 @@ const DebtManagementPlatform = () => {
 
   const toggleExpensePaid = (id) => {
     const expense = expenses.find((e) => e.id === id);
+    if (!expense) return;
+
+    if (!expense.paid) {
+      setSelectedExpenseForPayment(expense);
+      setPaymentDate(new Date(activeYear, activeMonth, 1));
+      setShowPaymentDateModal(true);
+      return;
+    }
+
     const updatedExpenses = expenses.map((expense) =>
-      expense.id === id ? { ...expense, paid: !expense.paid } : expense
+      expense.id === id
+        ? { ...expense, paid: false, paymentDate: null }
+        : expense
     );
     setExpenses(updatedExpenses);
     localStorage.setItem("expenses", JSON.stringify(updatedExpenses));
@@ -314,52 +336,71 @@ const DebtManagementPlatform = () => {
     if (expense?.isDebtPayment && expense?.linkedDebtId) {
       const updatedDebts = debts.map((debt) => {
         if (debt.id === expense.linkedDebtId) {
-          if (!expense.paid) {
-            const paymentDate = new Date();
-            paymentDate.setMonth(expense.month);
-            paymentDate.setFullYear(expense.year);
+          const remainingPayments = debt.termMonths - debt.advancePayments + 1;
+          const newBalance =
+            debt.type === "fixed"
+              ? debt.monthlyPayment * remainingPayments
+              : debt.currentBalance + expense.amount;
 
-            const remainingPayments =
-              debt.termMonths - debt.advancePayments - 1;
-            const newBalance =
-              debt.type === "fixed"
-                ? debt.monthlyPayment * remainingPayments
-                : debt.currentBalance - expense.amount;
-
-            return {
-              ...debt,
-              currentBalance: Math.max(0, newBalance),
-              payments: [
-                ...debt.payments,
-                {
-                  id: Date.now(),
-                  amount: expense.amount,
-                  date: paymentDate.toISOString().split("T")[0],
-                  type: expense.paymentType,
-                  expenseId: expense.id,
-                },
-              ],
-            };
-          } else {
-            const remainingPayments =
-              debt.termMonths - debt.advancePayments + 1;
-            const newBalance =
-              debt.type === "fixed"
-                ? debt.monthlyPayment * remainingPayments
-                : debt.currentBalance + expense.amount;
-
-            return {
-              ...debt,
-              currentBalance: Math.max(0, newBalance),
-              payments: debt.payments.filter((p) => p.expenseId !== expense.id),
-            };
-          }
+          return {
+            ...debt,
+            currentBalance: Math.max(0, newBalance),
+            payments: debt.payments.filter((p) => p.expenseId !== expense.id),
+          };
         }
         return debt;
       });
       setDebts(updatedDebts);
       localStorage.setItem("debts", JSON.stringify(updatedDebts));
     }
+  };
+
+  const confirmPayment = () => {
+    if (!selectedExpenseForPayment) return;
+
+    const updatedExpenses = expenses.map((expense) =>
+      expense.id === selectedExpenseForPayment.id
+        ? { ...expense, paid: true, paymentDate: paymentDate.toISOString() }
+        : expense
+    );
+    setExpenses(updatedExpenses);
+    localStorage.setItem("expenses", JSON.stringify(updatedExpenses));
+
+    if (
+      selectedExpenseForPayment?.isDebtPayment &&
+      selectedExpenseForPayment?.linkedDebtId
+    ) {
+      const updatedDebts = debts.map((debt) => {
+        if (debt.id === selectedExpenseForPayment.linkedDebtId) {
+          const remainingPayments = debt.termMonths - debt.advancePayments - 1;
+          const newBalance =
+            debt.type === "fixed"
+              ? debt.monthlyPayment * remainingPayments
+              : debt.currentBalance - selectedExpenseForPayment.amount;
+
+          return {
+            ...debt,
+            currentBalance: Math.max(0, newBalance),
+            payments: [
+              ...debt.payments,
+              {
+                id: Date.now(),
+                amount: selectedExpenseForPayment.amount,
+                date: paymentDate.toISOString().split("T")[0],
+                type: selectedExpenseForPayment.paymentType,
+                expenseId: selectedExpenseForPayment.id,
+              },
+            ],
+          };
+        }
+        return debt;
+      });
+      setDebts(updatedDebts);
+      localStorage.setItem("debts", JSON.stringify(updatedDebts));
+    }
+
+    setShowPaymentDateModal(false);
+    setSelectedExpenseForPayment(null);
   };
 
   const deleteExpense = (id) => {
@@ -670,6 +711,16 @@ const DebtManagementPlatform = () => {
   };
 
   const summary = getFinancialSummary();
+
+  const handleMonthChange = (month) => {
+    setActiveMonth(month);
+    setPaymentDate(new Date(activeYear, month, 1));
+  };
+
+  const handleYearChange = (year) => {
+    setActiveYear(year);
+    setPaymentDate(new Date(year, activeMonth, 1));
+  };
 
   return (
     <div className="min-h-screen bg-[#F2F2F7]">
@@ -1079,7 +1130,7 @@ const DebtManagementPlatform = () => {
                   {months.map((month, index) => (
                     <button
                       key={month}
-                      onClick={() => setActiveMonth(index)}
+                      onClick={() => handleMonthChange(index)}
                       className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
                         activeMonth === index
                           ? "bg-[#007AFF] text-white shadow-sm"
@@ -1092,7 +1143,7 @@ const DebtManagementPlatform = () => {
                 </div>
                 <select
                   value={activeYear}
-                  onChange={(e) => setActiveYear(parseInt(e.target.value))}
+                  onChange={(e) => handleYearChange(parseInt(e.target.value))}
                   className="px-4 py-2 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#007AFF] focus:border-transparent bg-white"
                 >
                   {getYearRange().map((year) => (
@@ -1241,6 +1292,18 @@ const DebtManagementPlatform = () => {
                               </h3>
                               <div className="flex items-center gap-2 text-sm text-[#8E8E93]">
                                 <span>{expense.category}</span>
+                                {expense.paid && expense.paymentDate && (
+                                  <span>
+                                    • Pagado el{" "}
+                                    {new Date(
+                                      expense.paymentDate
+                                    ).toLocaleDateString("es-ES", {
+                                      day: "2-digit",
+                                      month: "2-digit",
+                                      year: "numeric",
+                                    })}
+                                  </span>
+                                )}
                               </div>
                             </div>
                           </div>
@@ -1917,6 +1980,52 @@ const DebtManagementPlatform = () => {
                   className="flex-1 px-4 py-2 bg-[#34C759] text-white rounded-xl hover:bg-[#30B350] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
                   Agregar
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showPaymentDateModal && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-2xl p-6 w-full max-w-md mx-4 shadow-lg">
+              <h3 className="text-lg font-semibold mb-4 text-[#000000]">
+                Confirmar Pago
+              </h3>
+
+              <div className="space-y-4">
+                <div className="w-full">
+                  <label className="block text-sm font-medium text-[#000000] mb-1">
+                    Fecha de Pago
+                  </label>
+                  <div className="w-full">
+                    <DatePicker
+                      selected={paymentDate}
+                      onChange={(date) => setPaymentDate(date)}
+                      dateFormat="dd/MM/yyyy"
+                      className="w-full p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#007AFF] focus:border-transparent"
+                      wrapperClassName="w-full"
+                      openToDate={paymentDate}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex gap-3 mt-6">
+                <button
+                  onClick={() => {
+                    setShowPaymentDateModal(false);
+                    setSelectedExpenseForPayment(null);
+                  }}
+                  className="flex-1 px-4 py-2 border border-gray-200 rounded-xl hover:bg-[#F2F2F7] transition-colors text-[#007AFF]"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={confirmPayment}
+                  className="flex-1 px-4 py-2 bg-[#34C759] text-white rounded-xl hover:bg-[#30B350] transition-colors"
+                >
+                  Confirmar
                 </button>
               </div>
             </div>
