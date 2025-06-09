@@ -3,6 +3,7 @@ import {
   Check,
   CreditCard,
   DollarSign,
+  PiggyBank,
   Plus,
   Receipt,
   Trash2,
@@ -28,6 +29,24 @@ const DebtManagementPlatform = () => {
   const [incomes, setIncomes] = useState(() => {
     const savedIncomes = localStorage.getItem("incomes");
     return savedIncomes ? JSON.parse(savedIncomes) : [];
+  });
+  const [savingsCategories, setSavingsCategories] = useState(() => {
+    const savedCategories = localStorage.getItem("savingsCategories");
+    return savedCategories ? JSON.parse(savedCategories) : [];
+  });
+  const [savings, setSavings] = useState(() => {
+    const savedSavings = localStorage.getItem("savings");
+    return savedSavings ? JSON.parse(savedSavings) : [];
+  });
+  const [showSavingsCategoryModal, setShowSavingsCategoryModal] =
+    useState(false);
+  const [showSavingsModal, setShowSavingsModal] = useState(false);
+  const [newSavingsCategory, setNewSavingsCategory] = useState("");
+  const [savingsForm, setSavingsForm] = useState({
+    categoryId: "",
+    amount: "",
+    month: activeMonth,
+    year: activeYear,
   });
   const [showAdvancePaymentModal, setShowAdvancePaymentModal] = useState(false);
   const [selectedDebtForAdvance, setSelectedDebtForAdvance] = useState(null);
@@ -209,11 +228,14 @@ const DebtManagementPlatform = () => {
 
     const updatedDebts = debts.map((d) => {
       if (d.id === debtId) {
+        const newAdvancePayments = d.advancePayments + count;
+        const remainingPayments = d.termMonths - newAdvancePayments;
+        const newBalance = d.monthlyPayment * remainingPayments;
+
         return {
           ...d,
-          advancePayments: d.advancePayments + count,
-          currentBalance:
-            d.monthlyPayment * (d.termMonths - d.advancePayments - count),
+          advancePayments: newAdvancePayments,
+          currentBalance: newBalance,
           payments: [...d.payments, ...newPayments],
         };
       }
@@ -223,8 +245,7 @@ const DebtManagementPlatform = () => {
     setDebts(updatedDebts);
     localStorage.setItem("debts", JSON.stringify(updatedDebts));
 
-    // Eliminar los gastos mensuales correspondientes a las letras adelantadas
-    const updatedExpenses = [...expenses];
+    // Obtener los gastos mensuales de la deuda
     const debtExpenses = expenses.filter((e) => e.linkedDebtId === debtId);
 
     // Ordenar los gastos por fecha (del más lejano al más cercano)
@@ -234,17 +255,14 @@ const DebtManagementPlatform = () => {
       return dateB - dateA;
     });
 
-    // Eliminar los últimos 'count' gastos
+    // Eliminar los últimos 'count' gastos mensuales
     const expensesToRemove = sortedExpenses.slice(0, count);
-    expensesToRemove.forEach((expense) => {
-      const index = updatedExpenses.findIndex((e) => e.id === expense.id);
-      if (index !== -1) {
-        updatedExpenses.splice(index, 1);
-      }
-    });
+    const remainingExpenses = expenses.filter(
+      (e) => !expensesToRemove.some((removed) => removed.id === e.id)
+    );
 
-    setExpenses(updatedExpenses);
-    localStorage.setItem("expenses", JSON.stringify(updatedExpenses));
+    setExpenses(remainingExpenses);
+    localStorage.setItem("expenses", JSON.stringify(remainingExpenses));
 
     setShowAdvancePaymentModal(false);
     setSelectedDebtForAdvance(null);
@@ -311,13 +329,11 @@ const DebtManagementPlatform = () => {
             paymentDate.setFullYear(expense.year);
 
             // Para deudas de pago fijo, el saldo se calcula basado en las letras restantes
+            const remainingPayments =
+              debt.termMonths - debt.advancePayments - 1;
             const newBalance =
               debt.type === "fixed"
-                ? debt.monthlyPayment *
-                  (debt.termMonths -
-                    debt.advancePayments -
-                    debt.payments.length -
-                    1)
+                ? debt.monthlyPayment * remainingPayments
                 : debt.currentBalance - expense.amount;
 
             return {
@@ -337,13 +353,11 @@ const DebtManagementPlatform = () => {
           }
           // Si se está desmarcando como pagado
           else {
+            const remainingPayments =
+              debt.termMonths - debt.advancePayments + 1;
             const newBalance =
               debt.type === "fixed"
-                ? debt.monthlyPayment *
-                  (debt.termMonths -
-                    debt.advancePayments -
-                    debt.payments.length +
-                    1)
+                ? debt.monthlyPayment * remainingPayments
                 : debt.currentBalance + expense.amount;
 
             return {
@@ -454,6 +468,12 @@ const DebtManagementPlatform = () => {
     };
   };
 
+  const currentMonthSavings = React.useMemo(() => {
+    return savings
+      .filter((s) => s.month === activeMonth && s.year === activeYear)
+      .reduce((sum, saving) => sum + saving.amount, 0);
+  }, [savings, activeMonth, activeYear]);
+
   const getMonthlySummary = (month, year) => {
     const monthExpenses = expenses.filter(
       (expense) =>
@@ -463,8 +483,12 @@ const DebtManagementPlatform = () => {
 
     const monthIncomes = incomes.filter(
       (income) =>
-        (income.isFixed && income.month === month && income.year === year) ||
+        income.isFixed || // Incluir todos los ingresos fijos
         (!income.isFixed && income.month === month && income.year === year)
+    );
+
+    const monthSavings = savings.filter(
+      (saving) => saving.month === month && saving.year === year
     );
 
     const totalExpenses = monthExpenses.reduce(
@@ -474,6 +498,11 @@ const DebtManagementPlatform = () => {
 
     const totalIncomes = monthIncomes.reduce(
       (sum, income) => sum + income.amount,
+      0
+    );
+
+    const totalSavings = monthSavings.reduce(
+      (sum, saving) => sum + saving.amount,
       0
     );
 
@@ -497,7 +526,8 @@ const DebtManagementPlatform = () => {
         (sum, i) => sum + i.amount,
         0
       ),
-      balance: totalIncomes - totalExpenses,
+      totalSavings,
+      balance: totalIncomes - totalExpenses - totalSavings,
     };
   };
 
@@ -510,11 +540,14 @@ const DebtManagementPlatform = () => {
 
     const updatedDebts = debts.map((d) => {
       if (d.id === debtId) {
+        const newAdvancePayments = d.advancePayments - 1;
+        const remainingPayments = d.termMonths - newAdvancePayments;
+        const newBalance = d.monthlyPayment * remainingPayments;
+
         return {
           ...d,
-          advancePayments: d.advancePayments - 1,
-          currentBalance:
-            d.monthlyPayment * (d.termMonths - d.advancePayments + 1),
+          advancePayments: newAdvancePayments,
+          currentBalance: newBalance,
           payments: d.payments.filter((p) => p.id !== paymentId),
         };
       }
@@ -523,6 +556,43 @@ const DebtManagementPlatform = () => {
 
     setDebts(updatedDebts);
     localStorage.setItem("debts", JSON.stringify(updatedDebts));
+
+    // Obtener los gastos mensuales de la deuda
+    const debtExpenses = expenses.filter((e) => e.linkedDebtId === debtId);
+
+    // Ordenar los gastos por fecha (del más lejano al más cercano)
+    const sortedExpenses = debtExpenses.sort((a, b) => {
+      const dateA = new Date(a.year, a.month);
+      const dateB = new Date(b.year, b.month);
+      return dateB - dateA;
+    });
+
+    // Encontrar el último mes que tiene un pago
+    const lastPaymentMonth = sortedExpenses[0]?.month;
+    const lastPaymentYear = sortedExpenses[0]?.year;
+
+    // Crear un nuevo pago mensual para el mes siguiente al último pago
+    const nextMonth = lastPaymentMonth === 11 ? 0 : lastPaymentMonth + 1;
+    const nextYear =
+      lastPaymentMonth === 11 ? lastPaymentYear + 1 : lastPaymentYear;
+
+    const newExpense = {
+      id: Date.now(),
+      name: `Pago mensual - ${debt.name}`,
+      amount: debt.monthlyPayment,
+      category: "Deuda",
+      paid: false,
+      isFixed: false,
+      month: nextMonth,
+      year: nextYear,
+      isDebtPayment: true,
+      linkedDebtId: debtId,
+      paymentType: "regular",
+    };
+
+    const updatedExpenses = [...expenses, newExpense];
+    setExpenses(updatedExpenses);
+    localStorage.setItem("expenses", JSON.stringify(updatedExpenses));
   };
 
   const handleDelete = (type, id) => {
@@ -544,6 +614,9 @@ const DebtManagementPlatform = () => {
       case "income":
         deleteIncome(itemToDelete);
         break;
+      case "savingsCategory":
+        deleteSavingsCategory(itemToDelete);
+        break;
       default:
         break;
     }
@@ -551,6 +624,71 @@ const DebtManagementPlatform = () => {
     setShowConfirmModal(false);
     setItemToDelete(null);
     setDeleteType(null);
+  };
+
+  const addSavingsCategory = () => {
+    if (!newSavingsCategory.trim()) return;
+
+    const newCategory = {
+      id: Date.now(),
+      name: newSavingsCategory.trim(),
+    };
+
+    const updatedCategories = [...savingsCategories, newCategory];
+    setSavingsCategories(updatedCategories);
+    localStorage.setItem(
+      "savingsCategories",
+      JSON.stringify(updatedCategories)
+    );
+    setNewSavingsCategory("");
+    setShowSavingsCategoryModal(false);
+  };
+
+  const deleteSavingsCategory = (categoryId) => {
+    const updatedCategories = savingsCategories.filter(
+      (category) => category.id !== categoryId
+    );
+    setSavingsCategories(updatedCategories);
+    localStorage.setItem(
+      "savingsCategories",
+      JSON.stringify(updatedCategories)
+    );
+
+    // Eliminar todos los ahorros asociados a esta categoría
+    const updatedSavings = savings.filter(
+      (saving) => saving.categoryId !== categoryId
+    );
+    setSavings(updatedSavings);
+    localStorage.setItem("savings", JSON.stringify(updatedSavings));
+  };
+
+  const addSaving = () => {
+    if (!savingsForm.categoryId || !savingsForm.amount) return;
+
+    const newSaving = {
+      id: Date.now(),
+      ...savingsForm,
+      categoryId: parseInt(savingsForm.categoryId),
+      amount: parseFloat(savingsForm.amount),
+    };
+
+    const updatedSavings = [...savings, newSaving];
+    setSavings(updatedSavings);
+    localStorage.setItem("savings", JSON.stringify(updatedSavings));
+
+    setSavingsForm({
+      categoryId: "",
+      amount: "",
+      month: activeMonth,
+      year: activeYear,
+    });
+    setShowSavingsModal(false);
+  };
+
+  const deleteSaving = (id) => {
+    const updatedSavings = savings.filter((saving) => saving.id !== id);
+    setSavings(updatedSavings);
+    localStorage.setItem("savings", JSON.stringify(updatedSavings));
   };
 
   const summary = getFinancialSummary();
@@ -609,6 +747,16 @@ const DebtManagementPlatform = () => {
           >
             Gastos
           </button>
+          <button
+            onClick={() => setActiveTab("savings")}
+            className={`flex-1 px-6 py-3 rounded-xl font-medium transition-all ${
+              activeTab === "savings"
+                ? "bg-[#007AFF] text-white shadow-sm"
+                : "text-[#007AFF] hover:bg-[#F2F2F7]"
+            }`}
+          >
+            Ahorros
+          </button>
         </div>
 
         {activeTab === "debts" && (
@@ -628,8 +776,13 @@ const DebtManagementPlatform = () => {
               {debts.map((debt) => {
                 const nextPayment = calculateNextPayment(debt);
                 const progress =
-                  ((debt.principal - debt.currentBalance) / debt.principal) *
-                  100;
+                  debt.type === "fixed"
+                    ? ((debt.advancePayments + debt.payments.length) /
+                        debt.termMonths) *
+                      100
+                    : ((debt.principal - debt.currentBalance) /
+                        debt.principal) *
+                      100;
 
                 return (
                   <div
@@ -685,9 +838,19 @@ const DebtManagementPlatform = () => {
                         </p>
                       </div>
                       <div>
-                        <p className="text-xs text-[#8E8E93]">Progreso</p>
+                        <p className="text-xs text-[#8E8E93]">Plazo Restante</p>
                         <p className="text-base font-bold text-[#000000]">
-                          {progress.toFixed(1)}%
+                          {debt.type === "fixed"
+                            ? `${
+                                debt.termMonths -
+                                debt.advancePayments -
+                                debt.payments.filter(
+                                  (p) => p.type === "regular"
+                                ).length
+                              } meses`
+                            : `${Math.ceil(
+                                debt.currentBalance / debt.monthlyPayment
+                              )} meses`}
                         </p>
                       </div>
                     </div>
@@ -812,6 +975,14 @@ const DebtManagementPlatform = () => {
                   Agregar Ingreso
                 </button>
                 <button
+                  onClick={() => setShowSavingsModal(true)}
+                  disabled={savingsCategories.length === 0}
+                  className="bg-[#007AFF] text-white px-4 py-2 rounded-xl hover:bg-[#0066CC] disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2 shadow-sm"
+                >
+                  <PiggyBank className="h-4 w-4" />
+                  Agregar Ahorro
+                </button>
+                <button
                   onClick={() => setShowExpenseModal(true)}
                   className="bg-[#007AFF] text-white px-4 py-2 rounded-xl hover:bg-[#0066CC] transition-colors flex items-center gap-2 shadow-sm"
                 >
@@ -821,7 +992,7 @@ const DebtManagementPlatform = () => {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+            <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
               <div className="bg-white rounded-2xl shadow-sm p-6 border border-gray-100">
                 <div className="flex items-center justify-between">
                   <div>
@@ -871,6 +1042,24 @@ const DebtManagementPlatform = () => {
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm font-medium text-[#8E8E93]">
+                      Ingresos del Mes
+                    </p>
+                    <p className="text-2xl font-bold text-[#34C759]">
+                      $
+                      {getMonthlySummary(
+                        activeMonth,
+                        activeYear
+                      ).totalIncomes.toLocaleString()}
+                    </p>
+                  </div>
+                  <DollarSign className="h-8 w-8 text-[#34C759]" />
+                </div>
+              </div>
+
+              <div className="bg-white rounded-2xl shadow-sm p-6 border border-gray-100">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-[#8E8E93]">
                       Balance del Mes
                     </p>
                     <p
@@ -890,10 +1079,39 @@ const DebtManagementPlatform = () => {
                   <Calculator className="h-8 w-8 text-[#8E8E93]" />
                 </div>
               </div>
+
+              <div className="bg-white rounded-2xl shadow-sm p-6 border border-gray-100">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-[#8E8E93]">
+                      Ahorros del Mes
+                    </p>
+                    <p className="text-2xl font-bold text-[#34C759]">
+                      ${currentMonthSavings.toLocaleString()}
+                    </p>
+                  </div>
+                  <PiggyBank className="h-8 w-8 text-[#34C759]" />
+                </div>
+              </div>
             </div>
 
             <div className="flex flex-col space-y-2">
-              <div className="flex justify-end">
+              <div className="flex justify-end items-center gap-4">
+                <div className="flex space-x-1">
+                  {months.map((month, index) => (
+                    <button
+                      key={month}
+                      onClick={() => setActiveMonth(index)}
+                      className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                        activeMonth === index
+                          ? "bg-[#007AFF] text-white shadow-sm"
+                          : "bg-white text-[#007AFF] hover:bg-[#F2F2F7] border border-gray-200"
+                      }`}
+                    >
+                      {month.slice(0, 3)}
+                    </button>
+                  ))}
+                </div>
                 <select
                   value={activeYear}
                   onChange={(e) => setActiveYear(parseInt(e.target.value))}
@@ -905,23 +1123,6 @@ const DebtManagementPlatform = () => {
                     </option>
                   ))}
                 </select>
-              </div>
-              <div className="overflow-x-auto">
-                <div className="flex space-x-2 pb-2">
-                  {months.map((month, index) => (
-                    <button
-                      key={month}
-                      onClick={() => setActiveMonth(index)}
-                      className={`px-4 py-2 rounded-xl font-medium whitespace-nowrap transition-all ${
-                        activeMonth === index
-                          ? "bg-[#007AFF] text-white shadow-sm"
-                          : "bg-white text-[#007AFF] hover:bg-[#F2F2F7] border border-gray-200"
-                      }`}
-                    >
-                      {month}
-                    </button>
-                  ))}
-                </div>
               </div>
             </div>
 
@@ -952,7 +1153,7 @@ const DebtManagementPlatform = () => {
                                 {income.name}
                                 {income.isFixed && (
                                   <span className="ml-2 text-xs bg-[#34C759]/10 text-[#34C759] px-2 py-1 rounded-lg">
-                                    Fijo
+                                    Ingreso Fijo
                                   </span>
                                 )}
                               </h3>
@@ -971,6 +1172,47 @@ const DebtManagementPlatform = () => {
                           </div>
                         </div>
                       ))}
+
+                    {/* Ahorros */}
+                    {savings
+                      .filter(
+                        (saving) =>
+                          saving.month === activeMonth &&
+                          saving.year === activeYear
+                      )
+                      .map((saving) => {
+                        const category = savingsCategories.find(
+                          (c) => c.id === saving.categoryId
+                        );
+                        return (
+                          <div
+                            key={saving.id}
+                            className="flex justify-between items-center p-4 bg-[#F2F2F7] rounded-xl"
+                          >
+                            <div className="flex items-center gap-3">
+                              <div>
+                                <h3 className="font-medium text-[#000000]">
+                                  Ahorro - {category?.name || "Sin categoría"}
+                                  <span className="ml-2 text-xs bg-[#34C759]/10 text-[#34C759] px-2 py-1 rounded-lg">
+                                    Ahorro
+                                  </span>
+                                </h3>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <p className="font-bold text-[#34C759]">
+                                +${saving.amount.toLocaleString()}
+                              </p>
+                              <button
+                                onClick={() => deleteSaving(saving.id)}
+                                className="text-[#FF3B30] hover:text-[#FF2D55] transition-colors"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
 
                     {/* Gastos */}
                     {expenses
@@ -1057,6 +1299,10 @@ const DebtManagementPlatform = () => {
                 </h3>
                 {(() => {
                   const summary = getMonthlySummary(activeMonth, activeYear);
+                  const savingsPercentage =
+                    summary.totalIncomes > 0
+                      ? (summary.totalSavings / summary.totalIncomes) * 100
+                      : 0;
                   return (
                     <div className="space-y-4">
                       <div>
@@ -1088,6 +1334,15 @@ const DebtManagementPlatform = () => {
                         </p>
                       </div>
                       <div className="pt-4 border-t border-[#E5E5EA]">
+                        <p className="text-sm text-[#8E8E93]">Ahorros</p>
+                        <p className="text-xl font-bold text-[#34C759]">
+                          ${summary.totalSavings.toLocaleString()}
+                        </p>
+                        <p className="text-sm text-[#8E8E93]">
+                          {savingsPercentage.toFixed(1)}% del ingreso total
+                        </p>
+                      </div>
+                      <div className="pt-4 border-t border-[#E5E5EA]">
                         <p className="text-sm text-[#8E8E93]">Balance</p>
                         <p
                           className={`text-2xl font-bold ${
@@ -1104,6 +1359,82 @@ const DebtManagementPlatform = () => {
                   );
                 })()}
               </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === "savings" && (
+          <div className="space-y-6">
+            <div className="flex justify-between items-center">
+              <h2 className="text-2xl font-bold text-[#000000]">Mis Ahorros</h2>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setShowSavingsCategoryModal(true)}
+                  className="bg-[#34C759] text-white px-4 py-2 rounded-xl hover:bg-[#30B350] transition-colors flex items-center gap-2 shadow-sm"
+                >
+                  <Plus className="h-4 w-4" />
+                  Nueva Categoría
+                </button>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-2xl shadow-sm p-6 border border-gray-100">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-[#8E8E93]">
+                    Total Ahorrado
+                  </p>
+                  <p className="text-2xl font-bold text-[#34C759]">
+                    $
+                    {savings
+                      .reduce((sum, saving) => sum + saving.amount, 0)
+                      .toLocaleString()}
+                  </p>
+                </div>
+                <PiggyBank className="h-8 w-8 text-[#34C759]" />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {savingsCategories.map((category) => {
+                const categorySavings = savings.filter(
+                  (s) => s.categoryId === category.id
+                );
+                const totalAmount = categorySavings.reduce(
+                  (sum, saving) => sum + saving.amount,
+                  0
+                );
+
+                return (
+                  <div
+                    key={category.id}
+                    className="bg-white rounded-2xl shadow-sm p-4 border border-gray-100"
+                  >
+                    <div className="flex justify-between items-start mb-3">
+                      <div>
+                        <h3 className="text-lg font-semibold text-[#000000]">
+                          {category.name}
+                        </h3>
+                      </div>
+                      <button
+                        onClick={() =>
+                          handleDelete("savingsCategory", category.id)
+                        }
+                        className="text-[#FF3B30] hover:text-[#FF2D55] transition-colors"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+
+                    <div className="mb-3">
+                      <p className="text-sm text-[#8E8E93]">Total Acumulado</p>
+                      <p className="text-2xl font-bold text-[#34C759]">
+                        ${totalAmount.toLocaleString()}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
@@ -1295,43 +1626,6 @@ const DebtManagementPlatform = () => {
                     Gasto Fijo (se aplica a todos los meses)
                   </label>
                 </div>
-
-                {!expenseForm.isFixed && (
-                  <div className="space-y-4">
-                    <select
-                      value={expenseForm.month}
-                      onChange={(e) =>
-                        setExpenseForm({
-                          ...expenseForm,
-                          month: parseInt(e.target.value),
-                        })
-                      }
-                      className="w-full p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#007AFF] focus:border-transparent"
-                    >
-                      {months.map((month, index) => (
-                        <option key={month} value={index}>
-                          {month}
-                        </option>
-                      ))}
-                    </select>
-                    <select
-                      value={expenseForm.year}
-                      onChange={(e) =>
-                        setExpenseForm({
-                          ...expenseForm,
-                          year: parseInt(e.target.value),
-                        })
-                      }
-                      className="w-full p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#007AFF] focus:border-transparent"
-                    >
-                      {getYearRange().map((year) => (
-                        <option key={year} value={year}>
-                          {year}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
               </div>
 
               <div className="flex gap-3 mt-6">
@@ -1401,43 +1695,6 @@ const DebtManagementPlatform = () => {
                     Ingreso Fijo (se aplica a todos los meses)
                   </label>
                 </div>
-
-                {!incomeForm.isFixed && (
-                  <div className="space-y-4">
-                    <select
-                      value={incomeForm.month}
-                      onChange={(e) =>
-                        setIncomeForm({
-                          ...incomeForm,
-                          month: parseInt(e.target.value),
-                        })
-                      }
-                      className="w-full p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#007AFF] focus:border-transparent"
-                    >
-                      {months.map((month, index) => (
-                        <option key={month} value={index}>
-                          {month}
-                        </option>
-                      ))}
-                    </select>
-                    <select
-                      value={incomeForm.year}
-                      onChange={(e) =>
-                        setIncomeForm({
-                          ...incomeForm,
-                          year: parseInt(e.target.value),
-                        })
-                      }
-                      className="w-full p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#007AFF] focus:border-transparent"
-                    >
-                      {getYearRange().map((year) => (
-                        <option key={year} value={year}>
-                          {year}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
               </div>
 
               <div className="flex gap-3 mt-6">
@@ -1556,7 +1813,11 @@ const DebtManagementPlatform = () => {
                   ? "deuda"
                   : deleteType === "expense"
                   ? "gasto"
-                  : "ingreso"}
+                  : deleteType === "income"
+                  ? "ingreso"
+                  : deleteType === "savingsCategory"
+                  ? "categoría de ahorro"
+                  : ""}
                 ? Esta acción no se puede deshacer.
               </p>
               <div className="flex gap-3">
@@ -1575,6 +1836,109 @@ const DebtManagementPlatform = () => {
                   className="flex-1 px-4 py-2 bg-[#FF3B30] text-white rounded-xl hover:bg-[#FF2D55] transition-colors"
                 >
                   Eliminar
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showSavingsCategoryModal && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-2xl p-6 w-full max-w-md mx-4 shadow-lg">
+              <h3 className="text-lg font-semibold mb-4 text-[#000000]">
+                Nueva Categoría de Ahorro
+              </h3>
+
+              <div className="space-y-4">
+                <input
+                  type="text"
+                  placeholder="Nombre de la categoría"
+                  value={newSavingsCategory}
+                  onChange={(e) => setNewSavingsCategory(e.target.value)}
+                  className="w-full p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#007AFF] focus:border-transparent"
+                />
+              </div>
+
+              <div className="flex gap-3 mt-6">
+                <button
+                  onClick={() => {
+                    setShowSavingsCategoryModal(false);
+                    setNewSavingsCategory("");
+                  }}
+                  className="flex-1 px-4 py-2 border border-gray-200 rounded-xl hover:bg-[#F2F2F7] transition-colors text-[#007AFF]"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={addSavingsCategory}
+                  disabled={!newSavingsCategory.trim()}
+                  className="flex-1 px-4 py-2 bg-[#34C759] text-white rounded-xl hover:bg-[#30B350] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  Agregar
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showSavingsModal && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-2xl p-6 w-full max-w-md mx-4 shadow-lg">
+              <h3 className="text-lg font-semibold mb-4 text-[#000000]">
+                Agregar Ahorro
+              </h3>
+
+              <div className="space-y-4">
+                <select
+                  value={savingsForm.categoryId}
+                  onChange={(e) =>
+                    setSavingsForm({
+                      ...savingsForm,
+                      categoryId: e.target.value,
+                    })
+                  }
+                  className="w-full p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#007AFF] focus:border-transparent"
+                >
+                  <option value="">Seleccionar categoría</option>
+                  {savingsCategories.map((category) => (
+                    <option key={category.id} value={category.id}>
+                      {category.name}
+                    </option>
+                  ))}
+                </select>
+
+                <input
+                  type="number"
+                  placeholder="Monto"
+                  value={savingsForm.amount}
+                  onChange={(e) =>
+                    setSavingsForm({ ...savingsForm, amount: e.target.value })
+                  }
+                  className="w-full p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#007AFF] focus:border-transparent"
+                />
+              </div>
+
+              <div className="flex gap-3 mt-6">
+                <button
+                  onClick={() => {
+                    setShowSavingsModal(false);
+                    setSavingsForm({
+                      categoryId: "",
+                      amount: "",
+                      month: activeMonth,
+                      year: activeYear,
+                    });
+                  }}
+                  className="flex-1 px-4 py-2 border border-gray-200 rounded-xl hover:bg-[#F2F2F7] transition-colors text-[#007AFF]"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={addSaving}
+                  disabled={!savingsForm.categoryId || !savingsForm.amount}
+                  className="flex-1 px-4 py-2 bg-[#34C759] text-white rounded-xl hover:bg-[#30B350] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  Agregar
                 </button>
               </div>
             </div>
