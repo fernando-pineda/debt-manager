@@ -139,8 +139,8 @@ const DebtManagementPlatform = () => {
   const getYearRange = () => {
     const currentYear = new Date().getFullYear();
     const maxTermMonths = Math.max(...debts.map((debt) => debt.termMonths), 0);
-    const yearsToAdd = Math.ceil(maxTermMonths / 12) + 2;
-    return Array.from({ length: yearsToAdd }, (_, i) => currentYear - 2 + i);
+    const yearsToAdd = Math.ceil(maxTermMonths / 12);
+    return Array.from({ length: yearsToAdd + 1 }, (_, i) => currentYear + i);
   };
 
   const addDebt = () => {
