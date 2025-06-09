@@ -125,7 +125,6 @@ const DebtManagementPlatform = () => {
         newBalance: debt.currentBalance - principal,
       };
     } else {
-      // Para deudas de pago fijo
       const remainingPayments = debt.termMonths - debt.advancePayments;
       const currentBalance = debt.monthlyPayment * remainingPayments;
       return {
@@ -140,7 +139,7 @@ const DebtManagementPlatform = () => {
   const getYearRange = () => {
     const currentYear = new Date().getFullYear();
     const maxTermMonths = Math.max(...debts.map((debt) => debt.termMonths), 0);
-    const yearsToAdd = Math.ceil(maxTermMonths / 12) + 2; // +2 para tener margen
+    const yearsToAdd = Math.ceil(maxTermMonths / 12) + 2;
     return Array.from({ length: yearsToAdd }, (_, i) => currentYear - 2 + i);
   };
 
@@ -166,11 +165,9 @@ const DebtManagementPlatform = () => {
     setDebts(updatedDebts);
     localStorage.setItem("debts", JSON.stringify(updatedDebts));
 
-    // Crear los gastos mensuales para la deuda
     const currentDate = new Date();
     const newExpenses = [];
 
-    // Para deudas de pago fijo, solo crear los gastos para las letras no adelantadas
     const totalPayments =
       newDebt.type === "fixed"
         ? newDebt.termMonths - newDebt.advancePayments
@@ -245,17 +242,14 @@ const DebtManagementPlatform = () => {
     setDebts(updatedDebts);
     localStorage.setItem("debts", JSON.stringify(updatedDebts));
 
-    // Obtener los gastos mensuales de la deuda
     const debtExpenses = expenses.filter((e) => e.linkedDebtId === debtId);
 
-    // Ordenar los gastos por fecha (del más lejano al más cercano)
     const sortedExpenses = debtExpenses.sort((a, b) => {
       const dateA = new Date(a.year, a.month);
       const dateB = new Date(b.year, b.month);
       return dateB - dateA;
     });
 
-    // Eliminar los últimos 'count' gastos mensuales
     const expensesToRemove = sortedExpenses.slice(0, count);
     const remainingExpenses = expenses.filter(
       (e) => !expensesToRemove.some((removed) => removed.id === e.id)
@@ -271,9 +265,8 @@ const DebtManagementPlatform = () => {
 
   const addExpense = () => {
     if (expenseForm.isFixed) {
-      // Crear una instancia del gasto para cada mes
       const newExpenses = months.map((_, monthIndex) => ({
-        id: Date.now() + monthIndex, // ID único para cada instancia
+        id: Date.now() + monthIndex,
         ...expenseForm,
         amount: parseFloat(expenseForm.amount),
         month: monthIndex,
@@ -318,17 +311,14 @@ const DebtManagementPlatform = () => {
     setExpenses(updatedExpenses);
     localStorage.setItem("expenses", JSON.stringify(updatedExpenses));
 
-    // Si es un pago de deuda, actualizar la deuda
     if (expense?.isDebtPayment && expense?.linkedDebtId) {
       const updatedDebts = debts.map((debt) => {
         if (debt.id === expense.linkedDebtId) {
-          // Si se está marcando como pagado
           if (!expense.paid) {
             const paymentDate = new Date();
             paymentDate.setMonth(expense.month);
             paymentDate.setFullYear(expense.year);
 
-            // Para deudas de pago fijo, el saldo se calcula basado en las letras restantes
             const remainingPayments =
               debt.termMonths - debt.advancePayments - 1;
             const newBalance =
@@ -350,9 +340,7 @@ const DebtManagementPlatform = () => {
                 },
               ],
             };
-          }
-          // Si se está desmarcando como pagado
-          else {
+          } else {
             const remainingPayments =
               debt.termMonths - debt.advancePayments + 1;
             const newBalance =
@@ -378,7 +366,6 @@ const DebtManagementPlatform = () => {
     const expense = expenses.find((e) => e.id === id);
     if (!expense) return;
 
-    // Si es un gasto fijo y no está vinculado a una deuda, eliminar todas sus instancias
     if (expense.isFixed && !expense.isDebtPayment) {
       const updatedExpenses = expenses.filter(
         (e) => !(e.name === expense.name && e.isFixed && !e.isDebtPayment)
@@ -388,24 +375,20 @@ const DebtManagementPlatform = () => {
       return;
     }
 
-    // Si es un gasto de deuda, no permitir eliminarlo
     if (expense.isDebtPayment) {
       return;
     }
 
-    // Para gastos normales no fijos
     const updatedExpenses = expenses.filter((expense) => expense.id !== id);
     setExpenses(updatedExpenses);
     localStorage.setItem("expenses", JSON.stringify(updatedExpenses));
   };
 
   const deleteDebt = (id) => {
-    // Eliminar la deuda
     const updatedDebts = debts.filter((debt) => debt.id !== id);
     setDebts(updatedDebts);
     localStorage.setItem("debts", JSON.stringify(updatedDebts));
 
-    // Eliminar todos los gastos asociados a esta deuda
     const updatedExpenses = expenses.filter(
       (expense) => expense.linkedDebtId !== id
     );
@@ -483,7 +466,7 @@ const DebtManagementPlatform = () => {
 
     const monthIncomes = incomes.filter(
       (income) =>
-        income.isFixed || // Incluir todos los ingresos fijos
+        income.isFixed ||
         (!income.isFixed && income.month === month && income.year === year)
     );
 
@@ -557,21 +540,17 @@ const DebtManagementPlatform = () => {
     setDebts(updatedDebts);
     localStorage.setItem("debts", JSON.stringify(updatedDebts));
 
-    // Obtener los gastos mensuales de la deuda
     const debtExpenses = expenses.filter((e) => e.linkedDebtId === debtId);
 
-    // Ordenar los gastos por fecha (del más lejano al más cercano)
     const sortedExpenses = debtExpenses.sort((a, b) => {
       const dateA = new Date(a.year, a.month);
       const dateB = new Date(b.year, b.month);
       return dateB - dateA;
     });
 
-    // Encontrar el último mes que tiene un pago
     const lastPaymentMonth = sortedExpenses[0]?.month;
     const lastPaymentYear = sortedExpenses[0]?.year;
 
-    // Crear un nuevo pago mensual para el mes siguiente al último pago
     const nextMonth = lastPaymentMonth === 11 ? 0 : lastPaymentMonth + 1;
     const nextYear =
       lastPaymentMonth === 11 ? lastPaymentYear + 1 : lastPaymentYear;
@@ -654,7 +633,6 @@ const DebtManagementPlatform = () => {
       JSON.stringify(updatedCategories)
     );
 
-    // Eliminar todos los ahorros asociados a esta categoría
     const updatedSavings = savings.filter(
       (saving) => saving.categoryId !== categoryId
     );
