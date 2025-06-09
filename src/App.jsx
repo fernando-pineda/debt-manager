@@ -662,6 +662,7 @@ const DebtManagementPlatform = () => {
     );
     setNewSavingsCategory("");
     setShowSavingsCategoryModal(false);
+    setShowSavingsModal(true);
   };
 
   const deleteSavingsCategory = (categoryId) => {
@@ -1005,8 +1006,7 @@ const DebtManagementPlatform = () => {
                 </button>
                 <button
                   onClick={() => setShowSavingsModal(true)}
-                  disabled={savingsCategories.length === 0}
-                  className="bg-[#007AFF] text-white px-4 py-2 rounded-xl hover:bg-[#0066CC] disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2 shadow-sm"
+                  className="bg-[#34C759] text-white px-4 py-2 rounded-xl hover:bg-[#30B350] transition-colors flex items-center gap-2 shadow-sm"
                 >
                   <PiggyBank className="h-4 w-4" />
                   Agregar Ahorro
@@ -1905,6 +1905,7 @@ const DebtManagementPlatform = () => {
                   onClick={() => {
                     setShowSavingsCategoryModal(false);
                     setNewSavingsCategory("");
+                    setShowSavingsModal(true);
                   }}
                   className="flex-1 px-4 py-2 border border-gray-200 rounded-xl hover:bg-[#F2F2F7] transition-colors text-[#007AFF]"
                 >
@@ -1930,23 +1931,35 @@ const DebtManagementPlatform = () => {
               </h3>
 
               <div className="space-y-4">
-                <select
-                  value={savingsForm.categoryId}
-                  onChange={(e) =>
-                    setSavingsForm({
-                      ...savingsForm,
-                      categoryId: e.target.value,
-                    })
-                  }
-                  className="w-full p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#007AFF] focus:border-transparent"
-                >
-                  <option value="">Seleccionar categoría</option>
-                  {savingsCategories.map((category) => (
-                    <option key={category.id} value={category.id}>
-                      {category.name}
-                    </option>
-                  ))}
-                </select>
+                <div className="flex gap-2">
+                  <select
+                    value={savingsForm.categoryId}
+                    onChange={(e) =>
+                      setSavingsForm({
+                        ...savingsForm,
+                        categoryId: e.target.value,
+                      })
+                    }
+                    className="flex-1 p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#007AFF] focus:border-transparent"
+                  >
+                    <option value="">Seleccionar categoría</option>
+                    {savingsCategories.map((category) => (
+                      <option key={category.id} value={category.id}>
+                        {category.name}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={() => {
+                      setShowSavingsModal(false);
+                      setShowSavingsCategoryModal(true);
+                    }}
+                    className="px-4 py-2 bg-[#34C759] text-white rounded-xl hover:bg-[#30B350] transition-colors flex items-center gap-2"
+                  >
+                    <Plus className="h-4 w-4" />
+                    Nueva
+                  </button>
+                </div>
 
                 <input
                   type="number"
