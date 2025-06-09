@@ -930,9 +930,12 @@ const DebtManagementPlatform = () => {
                                   (p) => p.type === "regular"
                                 ).length
                               } meses`
-                            : `${Math.ceil(
-                                debt.currentBalance / debt.monthlyPayment
-                              )} meses`}
+                            : `${
+                                debt.termMonths -
+                                debt.payments.filter(
+                                  (p) => p.type === "regular"
+                                ).length
+                              } meses`}
                         </p>
                       </div>
                     </div>
