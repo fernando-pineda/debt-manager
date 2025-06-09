@@ -761,7 +761,7 @@ const DebtManagementPlatform = () => {
   return (
     <div className="min-h-screen bg-[#F2F2F7]">
       <div className="container mx-auto px-4 py-8">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
           <div className="bg-white rounded-2xl shadow-sm p-6 border border-gray-100">
             <div className="flex items-center justify-between">
               <div>
@@ -787,6 +787,23 @@ const DebtManagementPlatform = () => {
                 </p>
               </div>
               <Calculator className="h-8 w-8 text-[#FF9500]" />
+            </div>
+          </div>
+
+          <div className="bg-white rounded-2xl shadow-sm p-6 border border-gray-100">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-[#8E8E93]">
+                  Total Ahorrado
+                </p>
+                <p className="text-2xl font-bold text-[#34C759]">
+                  $
+                  {savings
+                    .reduce((sum, saving) => sum + saving.amount, 0)
+                    .toLocaleString()}
+                </p>
+              </div>
+              <PiggyBank className="h-8 w-8 text-[#34C759]" />
             </div>
           </div>
         </div>
@@ -1451,23 +1468,6 @@ const DebtManagementPlatform = () => {
                   <Plus className="h-4 w-4" />
                   Nueva Categoría
                 </button>
-              </div>
-            </div>
-
-            <div className="bg-white rounded-2xl shadow-sm p-6 border border-gray-100">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-[#8E8E93]">
-                    Total Ahorrado
-                  </p>
-                  <p className="text-2xl font-bold text-[#34C759]">
-                    $
-                    {savings
-                      .reduce((sum, saving) => sum + saving.amount, 0)
-                      .toLocaleString()}
-                  </p>
-                </div>
-                <PiggyBank className="h-8 w-8 text-[#34C759]" />
               </div>
             </div>
 
