@@ -45,6 +45,8 @@ const DebtManagementPlatform = () => {
   const [showSavingsCategoryModal, setShowSavingsCategoryModal] =
     useState(false);
   const [showSavingsModal, setShowSavingsModal] = useState(false);
+  const [showAddFundsModal, setShowAddFundsModal] = useState(false);
+  const [selectedCategoryId, setSelectedCategoryId] = useState(null);
   const [newSavingsCategory, setNewSavingsCategory] = useState("");
   const [savingsForm, setSavingsForm] = useState({
     categoryId: "",
@@ -551,7 +553,7 @@ const DebtManagementPlatform = () => {
         0
       ),
       totalSavings,
-      balance: totalIncomes - totalExpenses - totalSavings,
+      balance: totalIncomes - totalExpenses,
     };
   };
 
@@ -662,7 +664,6 @@ const DebtManagementPlatform = () => {
     );
     setNewSavingsCategory("");
     setShowSavingsCategoryModal(false);
-    setShowSavingsModal(true);
   };
 
   const deleteSavingsCategory = (categoryId) => {
@@ -682,13 +683,12 @@ const DebtManagementPlatform = () => {
     localStorage.setItem("savings", JSON.stringify(updatedSavings));
   };
 
-  const addSaving = () => {
-    if (!savingsForm.categoryId || !savingsForm.amount) return;
+  const addFundsToCategory = () => {
+    if (!selectedCategoryId || !savingsForm.amount) return;
 
     const newSaving = {
       id: Date.now(),
-      ...savingsForm,
-      categoryId: parseInt(savingsForm.categoryId),
+      categoryId: parseInt(selectedCategoryId),
       amount: parseFloat(savingsForm.amount),
     };
 
@@ -702,7 +702,8 @@ const DebtManagementPlatform = () => {
       month: activeMonth,
       year: activeYear,
     });
-    setShowSavingsModal(false);
+    setSelectedCategoryId(null);
+    setShowAddFundsModal(false);
   };
 
   const deleteSaving = (id) => {
@@ -1457,14 +1458,25 @@ const DebtManagementPlatform = () => {
                           {category.name}
                         </h3>
                       </div>
-                      <button
-                        onClick={() =>
-                          handleDelete("savingsCategory", category.id)
-                        }
-                        className="text-[#FF3B30] hover:text-[#FF2D55] transition-colors"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => {
+                            setSelectedCategoryId(category.id);
+                            setShowAddFundsModal(true);
+                          }}
+                          className="text-[#34C759] hover:text-[#30B350] transition-colors"
+                        >
+                          <Plus className="h-4 w-4" />
+                        </button>
+                        <button
+                          onClick={() =>
+                            handleDelete("savingsCategory", category.id)
+                          }
+                          className="text-[#FF3B30] hover:text-[#FF2D55] transition-colors"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
                     </div>
 
                     <div className="mb-3">
@@ -1905,14 +1917,21 @@ const DebtManagementPlatform = () => {
                   onClick={() => {
                     setShowSavingsCategoryModal(false);
                     setNewSavingsCategory("");
-                    setShowSavingsModal(true);
+                    if (activeTab !== "savings") {
+                      setShowSavingsModal(true);
+                    }
                   }}
                   className="flex-1 px-4 py-2 border border-gray-200 rounded-xl hover:bg-[#F2F2F7] transition-colors text-[#007AFF]"
                 >
                   Cancelar
                 </button>
                 <button
-                  onClick={addSavingsCategory}
+                  onClick={() => {
+                    addSavingsCategory();
+                    if (activeTab !== "savings") {
+                      setShowSavingsModal(true);
+                    }
+                  }}
                   disabled={!newSavingsCategory.trim()}
                   className="flex-1 px-4 py-2 bg-[#34C759] text-white rounded-xl hover:bg-[#30B350] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
@@ -1988,7 +2007,32 @@ const DebtManagementPlatform = () => {
                   Cancelar
                 </button>
                 <button
-                  onClick={addSaving}
+                  onClick={() => {
+                    if (!savingsForm.categoryId || !savingsForm.amount) return;
+
+                    const newSaving = {
+                      id: Date.now(),
+                      categoryId: parseInt(savingsForm.categoryId),
+                      amount: parseFloat(savingsForm.amount),
+                      month: activeMonth,
+                      year: activeYear,
+                    };
+
+                    const updatedSavings = [...savings, newSaving];
+                    setSavings(updatedSavings);
+                    localStorage.setItem(
+                      "savings",
+                      JSON.stringify(updatedSavings)
+                    );
+
+                    setSavingsForm({
+                      categoryId: "",
+                      amount: "",
+                      month: activeMonth,
+                      year: activeYear,
+                    });
+                    setShowSavingsModal(false);
+                  }}
                   disabled={!savingsForm.categoryId || !savingsForm.amount}
                   className="flex-1 px-4 py-2 bg-[#34C759] text-white rounded-xl hover:bg-[#30B350] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
@@ -2039,6 +2083,53 @@ const DebtManagementPlatform = () => {
                   className="flex-1 px-4 py-2 bg-[#34C759] text-white rounded-xl hover:bg-[#30B350] transition-colors"
                 >
                   Confirmar
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showAddFundsModal && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-2xl p-6 w-full max-w-md mx-4 shadow-lg">
+              <h3 className="text-lg font-semibold mb-4 text-[#000000]">
+                Añadir Fondos
+              </h3>
+
+              <div className="space-y-4">
+                <input
+                  type="number"
+                  placeholder="Monto"
+                  value={savingsForm.amount}
+                  onChange={(e) =>
+                    setSavingsForm({ ...savingsForm, amount: e.target.value })
+                  }
+                  className="w-full p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#007AFF] focus:border-transparent"
+                />
+              </div>
+
+              <div className="flex gap-3 mt-6">
+                <button
+                  onClick={() => {
+                    setShowAddFundsModal(false);
+                    setSavingsForm({
+                      categoryId: "",
+                      amount: "",
+                      month: activeMonth,
+                      year: activeYear,
+                    });
+                    setSelectedCategoryId(null);
+                  }}
+                  className="flex-1 px-4 py-2 border border-gray-200 rounded-xl hover:bg-[#F2F2F7] transition-colors text-[#007AFF]"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={addFundsToCategory}
+                  disabled={!savingsForm.amount}
+                  className="flex-1 px-4 py-2 bg-[#34C759] text-white rounded-xl hover:bg-[#30B350] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  Añadir
                 </button>
               </div>
             </div>
