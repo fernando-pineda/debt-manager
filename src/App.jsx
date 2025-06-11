@@ -505,8 +505,7 @@ const DebtManagementPlatform = () => {
   const getMonthlySummary = (month, year) => {
     const monthExpenses = expenses.filter(
       (expense) =>
-        (expense.isFixed && expense.month === month && expense.year === year) ||
-        (!expense.isFixed && expense.month === month && expense.year === year)
+        !expense.isFixed && expense.month === month && expense.year === year
     );
 
     const monthIncomes = incomes.filter(
@@ -534,17 +533,31 @@ const DebtManagementPlatform = () => {
       0
     );
 
-    const fixedExpenses = monthExpenses.filter((e) => e.isFixed);
+    const uniqueFixedExpenses = expenses
+      .filter((e) => e.isFixed)
+      .reduce((acc, expense) => {
+        if (!acc[expense.name]) {
+          acc[expense.name] = expense;
+        }
+        return acc;
+      }, {});
+
+    const fixedExpenses = Object.values(uniqueFixedExpenses);
     const variableExpenses = monthExpenses.filter((e) => !e.isFixed);
 
     const fixedIncomes = monthIncomes.filter((i) => i.isFixed);
     const variableIncomes = monthIncomes.filter((i) => !i.isFixed);
 
+    const fixedExpensesTotal = fixedExpenses.reduce(
+      (sum, e) => sum + e.amount,
+      0
+    );
+
     return {
       totalExpenses,
       fixedExpenses,
       variableExpenses,
-      fixedTotal: fixedExpenses.reduce((sum, e) => sum + e.amount, 0),
+      fixedTotal: fixedExpensesTotal,
       variableTotal: variableExpenses.reduce((sum, e) => sum + e.amount, 0),
       totalIncomes,
       fixedIncomes,
@@ -555,7 +568,7 @@ const DebtManagementPlatform = () => {
         0
       ),
       totalSavings,
-      balance: totalIncomes - totalExpenses,
+      balance: totalIncomes - totalExpenses - fixedExpensesTotal,
     };
   };
 
